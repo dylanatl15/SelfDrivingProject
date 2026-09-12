@@ -74,9 +74,12 @@ realism that matters for transfer lives in
 [`dynamics/actuators.py`](src/selfdrive/dynamics/actuators.py) — servo slew rate, motor
 lag, throttle deadband, steering trim.
 
-**Reward** — progress is scored as *net displacement over a 2 s window*, not instantaneous
-speed, so driving in circles earns roughly a third of what real progress does. Reversing
-is a small cost, never a bonus. Rationale and the arithmetic are in
+**Reward** — the drive signal pays for *new ground*: the car sweeps a 0.25 m disk over a
+raster of the floor and is paid per metre of swath it has not covered before, so a loop
+of any size earns one lap and then nothing. (An earlier 2 s net-displacement window was
+beaten by wide fast loops.)
+Lateral acceleration is penalized, because the tire-less sim corners harder than the
+real car can. Reversing is a small cost, never a bonus. Rationale and the arithmetic are in
 [`envs/rewards.py`](src/selfdrive/envs/rewards.py).
 
 ## Three hardware facts that shape the whole design

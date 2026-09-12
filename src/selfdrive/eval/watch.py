@@ -125,6 +125,7 @@ def main(argv=None) -> None:
             print(
                 f"ep {episode:4d}  {label:<34} {outcome:<5}  "
                 f"dist {m.get('distance_m', 0.0):6.2f} m  "
+                f"cover {m.get('coverage_m2', 0.0):5.1f} m2  "
                 f"speed {m.get('mean_speed_mps', 0.0):4.2f} m/s  "
                 f"reverse {m.get('reverse_frac', 0.0):5.1%}  return {total:8.1f}",
                 flush=True,

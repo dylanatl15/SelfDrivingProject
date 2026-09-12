@@ -73,6 +73,7 @@ def bucket_training_curve(rows: list[dict[str, float]], n_buckets: int = 20
             "collision_rate": mean("collided"),
             "stuck_rate": mean("stuck"),
             "distance_m": mean("distance_m"),
+            "coverage_m2": mean("coverage_m2"),
             "mean_speed_mps": mean("mean_speed_mps"),
             "min_clearance_m": mean("min_clearance_m"),
             "reverse_frac": mean("reverse_frac"),
@@ -116,15 +117,16 @@ def build_report(run_dir: Path, model: str | None, config: str, n_episodes: int)
             "## Training curve",
             "",
             "Episodes bucketed by timestep. `collision_rate` and `stuck_rate` are the two",
-            "Phase 1 failure modes and should both fall; `distance_m` should rise.",
+            "Phase 1 failure modes and should both fall; `coverage_m2` should rise.",
+            "`distance_m` alone proves little: a car orbiting an open patch racks it up.",
             "",
             _table(
                 curve,
                 ["timesteps", "episodes", "collision_rate", "stuck_rate", "distance_m",
-                 "mean_speed_mps", "reverse_frac"],
+                 "coverage_m2", "mean_speed_mps", "reverse_frac"],
                 {"timesteps": ".0f", "episodes": ".0f", "collision_rate": ".3f",
-                 "stuck_rate": ".3f", "distance_m": ".2f", "mean_speed_mps": ".2f",
-                 "reverse_frac": ".3f"},
+                 "stuck_rate": ".3f", "distance_m": ".2f", "coverage_m2": ".1f",
+                 "mean_speed_mps": ".2f", "reverse_frac": ".3f"},
             ),
             "",
             f"Total episodes recorded: {len(rows):,}",
@@ -152,13 +154,16 @@ def build_report(run_dir: Path, model: str | None, config: str, n_episodes: int)
             "",
             "Held-out seeds, identical arenas for both rows.",
             "",
-            "| policy | success | collision | stuck | distance m | speed m/s | reverse |",
-            "|---|---|---|---|---|---|---|",
+            "| policy | success | collision | stuck | distance m | coverage m2 | speed m/s "
+            "| reverse |",
+            "|---|---|---|---|---|---|---|---|",
             f"| trained | {trained.success_rate:.1%} | {trained.collision_rate:.1%} | "
             f"{trained.stuck_rate:.1%} | {trained.mean_distance_m:.2f} | "
+            f"{trained.mean_coverage_m2:.1f} | "
             f"{trained.mean_speed_mps:.2f} | {trained.mean_reverse_frac:.1%} |",
             f"| random | {baseline.success_rate:.1%} | {baseline.collision_rate:.1%} | "
             f"{baseline.stuck_rate:.1%} | {baseline.mean_distance_m:.2f} | "
+            f"{baseline.mean_coverage_m2:.1f} | "
             f"{baseline.mean_speed_mps:.2f} | {baseline.mean_reverse_frac:.1%} |",
             "",
             "## Adversarial scenarios",

@@ -167,7 +167,8 @@ class PygameView:
             f"step {env.steps:5d}/{env.cfg.max_steps}   dt {env.dt * 1000:5.1f} ms",
             f"speed {s.speed:+5.2f} m/s   steer {math.degrees(s.steer):+6.1f} deg",
             f"depth conf {env.depth.confidence:4.2f}   fov {env.depth.p.fov_deg:5.1f} deg",
-            f"stalled {env.reward_fn.stalled_steps:3d}/{env.cfg.reward.stall_limit}",
+            f"stalled {env.reward_fn.stalled_steps:3d}/{env.cfg.reward.stall_limit}   "
+            f"coverage {env.reward_fn.coverage_m2:5.1f} m2",
         ]
         for i, text in enumerate(lines):
             colour = WARN if "stalled" in text and env.reward_fn.stalled_steps > 0 else TEXT

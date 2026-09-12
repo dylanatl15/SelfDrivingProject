@@ -54,7 +54,7 @@ class EpisodeCsvLogger(BaseCallback):
     """
 
     FIELDS = [
-        "timesteps", "wall_s", "distance_m", "mean_speed_mps", "min_clearance_m",
+        "timesteps", "wall_s", "distance_m", "coverage_m2", "mean_speed_mps", "min_clearance_m",
         "stall_frac", "reverse_frac", "collided", "stuck", "steps",
     ]
 

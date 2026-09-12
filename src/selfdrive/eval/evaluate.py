@@ -43,6 +43,7 @@ class EvalResult:
     stuck_rate: float = 0.0
     mean_return: float = 0.0
     mean_distance_m: float = 0.0
+    mean_coverage_m2: float = 0.0  # path length can be inflated by circling; this cannot
     mean_speed_mps: float = 0.0
     mean_min_clearance_m: float = 0.0
     mean_reverse_frac: float = 0.0
@@ -55,7 +56,8 @@ class EvalResult:
         return (
             f"episodes {self.episodes:4d}  success {self.success_rate:6.1%}  "
             f"collision {self.collision_rate:6.1%}  stuck {self.stuck_rate:6.1%}  "
-            f"dist {self.mean_distance_m:6.2f} m  speed {self.mean_speed_mps:5.2f} m/s  "
+            f"dist {self.mean_distance_m:6.2f} m  cover {self.mean_coverage_m2:6.1f} m2  "
+            f"speed {self.mean_speed_mps:5.2f} m/s  "
             f"reverse {self.mean_reverse_frac:5.1%}"
         )
 
@@ -111,6 +113,7 @@ def run_episodes(
         stuck_rate=float(np.mean(stuck)),
         mean_return=float(np.mean(returns)),
         mean_distance_m=mean("distance_m"),
+        mean_coverage_m2=mean("coverage_m2"),
         mean_speed_mps=mean("mean_speed_mps"),
         mean_min_clearance_m=mean("min_clearance_m"),
         mean_reverse_frac=mean("reverse_frac"),

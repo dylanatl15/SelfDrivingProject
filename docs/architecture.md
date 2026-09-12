@@ -67,7 +67,7 @@ That is when `RecurrentPPO` with `MlpLstmPolicy` earns its cost. Not before.
 ## Phase 2 and 3 hooks
 
 - **Phase 2 (GPS):** append a two-float `[range, bearing]` goal block to the per-frame
-  observation in `envs/obs.py`, and swap the progress term in `envs/rewards.py` for
+  observation in `envs/obs.py`, and swap the explore term in `envs/rewards.py` for
   reduction in distance-to-goal. Nothing else changes.
 - **Phase 3 (pan-tilt):** add a camera-yaw action, swap `PPO` for `RecurrentPPO`. The
   environment does not change at all — `frame_stack` becomes the LSTM's job.
