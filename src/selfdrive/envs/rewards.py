@@ -188,6 +188,15 @@ class RewardFunction:
         rasterized disk is 2n+1 pixels across, ~10 % wider than the disk it stands for."""
         return self._painted * self._metres_per_pixel * 2.0 * self.c.explore_radius
 
+    def coverage_raster(self) -> tuple[np.ndarray, tuple[float, float], float]:
+        """For the viewport; nothing in training reads it.
+
+        Returns seconds since each pixel was last covered (inf where never) as a `(w, h)`
+        array indexed `[x, y]`, the world position of pixel `[0, 0]`'s centre, and the
+        pixel size. A pixel counts as covered while its age is below `revisit_s`.
+        """
+        return self._clock - self._seen.reshape(self._shape), self._origin, self.c.explore_res
+
     def _net_displacement(self, window: int) -> tuple[float, int]:
         """Straight-line distance covered over the last `window` steps, and how many
         steps were actually available (the window is short at the start of an episode)."""

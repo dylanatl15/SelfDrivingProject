@@ -156,7 +156,10 @@ class PeriodicEval(BaseCallback):
 
         if self._next_video is not None and self.num_timesteps >= self._next_video:
             self._next_video += self.video_every_steps
-            self._record_video()
+            try:
+                self._record_video()
+            except Exception as exc:  # a broken video must never end a multi-hour run
+                print(f"[eval] video failed, training continues: {exc!r}")
         return True
 
     def _record_video(self) -> None:

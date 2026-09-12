@@ -199,6 +199,23 @@ def test_coverage_is_swept_area_not_path_length():
     assert looped < 0.5 * straight
 
 
+def test_coverage_raster_is_where_the_car_went():
+    fn = RewardFunction()
+    poses = line(1.0, 150)  # 5 m along +x
+    drive(fn, poses)
+    age, (ox, oy), res = fn.coverage_raster()
+
+    def age_at(x, y):
+        return float(age[round((x - ox) / res), round((y - oy) / res)])
+
+    x_start, y_start, _ = poses[0]
+    x_end, y_end, _ = poses[-1]
+    assert age_at(x_end, y_end) <= 2 * DT + 1e-6  # just stamped
+    assert age_at(x_start, y_start) > 4.0  # stamped ~5 s ago
+    assert math.isinf(age_at(x_end, y_end + 1.0))  # beside the swath
+    assert math.isinf(age_at(x_end + 1.0, y_end))  # not reached yet
+
+
 def test_lateral_penalty_is_speed_squared_over_radius():
     c = RewardConfig()
     radius, speed = 1.0, 1.5
