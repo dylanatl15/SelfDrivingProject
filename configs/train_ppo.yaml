@@ -1,0 +1,34 @@
+# PPO on a 68-float observation through a small MLP. This is CPU work: throughput is
+# bound by env stepping across the workers, not by the network. See pyproject.toml.
+
+env_config: configs/env_phase1.yaml
+n_envs: 20              # 14C/28T Xeon; leaves headroom for the eval env and the OS
+total_timesteps: 20000000
+seed: 0
+device: cpu
+
+policy: MlpPolicy
+net_arch: [256, 256]
+
+# n_steps is per env, so the rollout buffer is n_steps * n_envs = 10240 samples.
+n_steps: 512
+batch_size: 512
+n_epochs: 10
+learning_rate: 3.0e-4
+gamma: 0.995            # ~6.7 s horizon at 30 Hz; long enough to see a wall coming
+gae_lambda: 0.95
+clip_range: 0.2
+ent_coef: 0.004         # a little exploration pressure, or it converges to driving straight
+vf_coef: 0.5
+max_grad_norm: 0.5
+
+# Reward normalization only. Observations are normalized analytically inside the env so
+# the exported ONNX stays self-contained - no running-stats file to sync to the phone.
+normalize_reward: true
+
+eval_every_steps: 500000
+eval_episodes: 20
+video_every_steps: 2000000
+video_episodes: 2
+checkpoint_every_steps: 500000   # also how often `selfdrive.eval.watch` picks up a newer policy
+run_dir: runs
