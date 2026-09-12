@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import time
 from pathlib import Path
 
@@ -78,6 +79,14 @@ def main(argv=None) -> None:
     name = args.name or time.strftime("ppo_%Y%m%d_%H%M%S")
     run_dir = Path(cfg["run_dir"]) / name
     run_dir.mkdir(parents=True, exist_ok=True)
+
+    # Snapshot the env YAML and point everything at the copy. PeriodicEval re-reads its
+    # config at every evaluation, so editing the shared YAML mid-run used to crash the run
+    # (phase1_v1 died at 4M steps when the reward keys changed under it).
+    snapshot = run_dir / "env_config.yaml"
+    shutil.copyfile(cfg["env_config"], snapshot)
+    cfg["env_config_source"] = cfg["env_config"]
+    cfg["env_config"] = str(snapshot)
 
     env_cfg = load_env_config(cfg["env_config"])
     (run_dir / "train_config.json").write_text(json.dumps(cfg, indent=2, default=str))

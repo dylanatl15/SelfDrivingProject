@@ -34,7 +34,10 @@ first, then `docs/protocol.md`.
 ## Tests worth understanding before changing the reward
 
 `tests/test_rewards.py` pins the *ordering* the reward is meant to express: forward
-driving must beat parking, circling, shuffling in place, and reversing. If a reward tweak
+driving must beat parking, tight circles, wide fast loops, a slow weave, shuffling in
+place, and reversing. Wide loops are pinned because `phase1_v1` found them: a 2 s
+displacement window paid a 1-2 m orbit almost as well as a straight line. The weave is
+pinned because a per-cell coverage grid, which looks isotropic, paid it more than a line. If a reward tweak
 breaks one of those, the tweak is wrong, not the test.
 
 ## Throughput ceiling - do not chase it

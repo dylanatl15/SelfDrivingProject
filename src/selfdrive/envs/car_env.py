@@ -149,7 +149,7 @@ class CarEnv(gym.Env):
         self.car.reset(x, y, theta)
         self.depth.reset(self.np_random)
         self.ultra.reset(self.np_random)
-        self.reward_fn.reset(x, y)
+        self.reward_fn.reset(x, y, theta, self.world.bounds)
         self.steps = 0
         self._last_action[:] = 0.0
         self._episode = {
@@ -205,6 +205,7 @@ class CarEnv(gym.Env):
         reward, terms = self.reward_fn(
             x=state.x,
             y=state.y,
+            theta=state.theta,
             throttle_cmd=float(action[THROTTLE]),
             steer_cmd=float(action[STEER]),
             prev_steer_cmd=prev_steer_cmd,
@@ -235,6 +236,8 @@ class CarEnv(gym.Env):
         n = max(self.steps, 1)
         return {
             "distance_m": self._episode["distance"],
+            # Path length rewards orbiting an open patch; covered floor area does not.
+            "coverage_m2": self.reward_fn.coverage_m2,
             "mean_speed_mps": self._episode["speed_sum"] / n,
             "min_clearance_m": self._episode["min_clearance"],
             "stall_frac": self._episode["stall_steps"] / n,

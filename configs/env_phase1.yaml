@@ -47,14 +47,19 @@ obs:
   norm_steer_max: 0.4887
 
 reward:
-  w_progress: 1.0
+  # Why new ground rather than speed or displacement: see the docstring in envs/rewards.py.
+  w_explore: 1.0        # per metre of new ground
   w_reverse: 0.02
   w_oscillation: 0.05
+  w_lateral: 0.05
   w_proximity: 0.05
   w_stall: 0.5
   collision_penalty: 100.0
+  explore_radius: 0.25
+  explore_res: 0.05
+  revisit_s: 60.0       # longer than an episode, so a loop of any size pays for one lap
+  lateral_accel_ref: 3.0
   safe_distance: 0.6
-  progress_window: 60   # ~2 s; long enough that circling scores well below straight
   stall_window: 45
   stall_eps: 0.08
   stall_limit: 90
