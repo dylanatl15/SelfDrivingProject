@@ -8,6 +8,10 @@ The view deliberately draws the true sensor sweep *and* the corrupted readings t
 actually receives. Watching the two diverge is the fastest way to confirm that dropout,
 latency and staleness are behaving, and those are the parts of the model most likely to
 be silently wrong.
+
+Under everything sits the ground the explore reward has already paid for, bright where the
+car has just been and dimmer with age. A car that orbits shows up at once as a ring that
+stops growing. Press C to toggle it.
 """
 
 from __future__ import annotations
@@ -28,6 +32,9 @@ RAY_SEEN = (120, 220, 150)
 ULTRA = (235, 110, 130)
 TEXT = (210, 216, 226)
 WARN = (250, 200, 90)
+PAINT_NEW = (64, 168, 128)
+PAINT_OLD = (36, 66, 60)
+PAINT_FADE_S = 8.0  # seconds for covered ground to fade from PAINT_NEW to PAINT_OLD
 
 
 class PygameView:
@@ -49,6 +56,7 @@ class PygameView:
             self.screen = pygame.Surface(size)
             self.clock = None
         self.font = pygame.font.SysFont("monospace", 14)
+        self.show_coverage = True
 
     # --- world <-> screen ----------------------------------------------------
 
@@ -79,11 +87,15 @@ class PygameView:
             for event in pg.event.get():
                 if event.type == pg.QUIT:
                     raise SystemExit(0)
+                if event.type == pg.KEYDOWN and event.key == pg.K_c:
+                    self.show_coverage = not self.show_coverage
 
         world, car = env.world, env.car
         s = car.state
         t = self._fit(world.bounds)
         self.screen.fill(BG)
+        if self.show_coverage:
+            self._draw_coverage(env, t)
 
         for seg in world.segments:
             a, b = self._to_screen(np.array([[seg[0], seg[1]], [seg[2], seg[3]]]), t)
@@ -115,6 +127,37 @@ class PygameView:
             self.clock.tick(self.fps)
             return None
         return np.transpose(pg.surfarray.array3d(self.screen), axes=(1, 0, 2))
+
+    def _draw_coverage(self, env, t):
+        raster = getattr(env.reward_fn, "coverage_raster", None)
+        if raster is None:
+            # A training process that loaded an older reward module can still import this
+            # view for its eval videos. Draw without the layer rather than crash the run.
+            return
+        age, (ox, oy), res = raster()
+        covered = age < env.reward_fn.c.revisit_s
+        cols = np.flatnonzero(covered.any(axis=1))
+        rows = np.flatnonzero(covered.any(axis=0))
+        if cols.size == 0:
+            return
+
+        # Only the bounding box of covered ground, so the cost tracks what has been driven.
+        x0, x1, y0, y1 = cols[0], cols[-1] + 1, rows[0], rows[-1] + 1
+        age, covered = age[x0:x1, y0:y1], covered[x0:x1, y0:y1]
+        fade = np.clip(age / PAINT_FADE_S, 0.0, 1.0)[..., None]
+        new, old = np.array(PAINT_NEW, np.float32), np.array(PAINT_OLD, np.float32)
+        rgb = (1.0 - fade) * new + fade * old
+        rgb = np.where(covered[..., None], rgb, np.array(BG, np.float32)).astype(np.uint8)
+
+        pg = self.pygame
+        surf = pg.surfarray.make_surface(np.ascontiguousarray(rgb[:, ::-1]))  # screen y is down
+        w, h = covered.shape
+        scale = t[0]
+        size = (max(1, round(w * res * scale)), max(1, round(h * res * scale)))
+        # Pixel [i, j] is centred on origin + (i, j) * res, so the top-left corner of the
+        # crop is half a pixel left of its first column and above its last row.
+        corner = np.array([[ox + (x0 - 0.5) * res, oy + (y0 + h - 0.5) * res]])
+        self.screen.blit(pg.transform.scale(surf, size), self._to_screen(corner, t)[0])
 
     def _draw_depth(self, env, t):
         pg = self.pygame
