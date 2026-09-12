@@ -55,6 +55,12 @@ class DomainRandConfig:
     # --- control loop ---
     dt: Range = (0.025, 0.040)  # 25-40 ms, i.e. 25-40 Hz with jitter
 
+    # --- visual-inertial odometry, read only when the observation has a memory ring ---
+    odom_scale_error: Range = (-0.03, 0.03)
+    odom_pos_noise: Range = (0.01, 0.08)  # m per sqrt(m)
+    odom_yaw_noise: Range = (0.005, 0.05)  # rad per sqrt(rad)
+    odom_tracking_loss_per_s: Range = (0.0, 0.05)
+
     def sample(self, rng: np.random.Generator) -> dict[str, float] | None:
         """Draw one episode's parameters, or None when randomization is off.
 
@@ -87,4 +93,19 @@ class DomainRandConfig:
             "ultra_dropout": pick(self.ultra_dropout),
             "ultra_update_hz": pick(self.ultra_update_hz),
             "dt": pick(self.dt),
+        }
+
+    def sample_odometry(self, rng: np.random.Generator) -> dict[str, float] | None:
+        """Draw the odometry parameters, keyed like `OdometryParams`, or None when off.
+
+        Separate from `sample` so that adding these axes changed none of its draws: a seed
+        still produces the same car and arena it did before the memory existed."""
+        if not self.enabled:
+            return None
+        pick = lambda r: _u(rng, r)  # noqa: E731
+        return {
+            "scale_error": pick(self.odom_scale_error),
+            "pos_noise": pick(self.odom_pos_noise),
+            "yaw_noise": pick(self.odom_yaw_noise),
+            "tracking_loss_per_s": pick(self.odom_tracking_loss_per_s),
         }

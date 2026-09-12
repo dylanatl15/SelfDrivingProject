@@ -66,6 +66,13 @@ values (speed, steering angle, last throttle command, last steering command). La
 documented in [`src/selfdrive/envs/obs.py`](src/selfdrive/envs/obs.py) and **must** be
 mirrored exactly by the Android app.
 
+**Obstacle memory** (optional) — [`configs/env_phase1_memory.yaml`](configs/env_phase1_memory.yaml)
+appends 48 floats: for each of 24 sectors around the car, the distance and age of the
+nearest obstacle point measured in the last 3 s. Points are stored in a world frame and
+re-projected through an odometry estimate that drifts and can lose tracking, as ARCore's
+does. A wall stays in memory after it leaves the camera's view. Rules for the phone:
+[`docs/memory-ring.md`](docs/memory-ring.md).
+
 **Action** — `Box(-1, 1, shape=(2,))`: `[steering, throttle]`. Throttle spans −1 (full
 reverse) to +1 (full forward), so backing out of a trap is available at every step.
 

@@ -2,7 +2,7 @@
 
 Explicit section mapping rather than reflection over type annotations. With
 `from __future__ import annotations` in force everywhere, dataclass field types are
-strings at runtime, and the generic version of this would be more magic than the seven
+strings at runtime, and the generic version of this would be more magic than the eight
 sections it saves.
 
 Angles are stored in radians but written in degrees, because nobody wants to review a
@@ -23,6 +23,7 @@ from .envs.obs import ObsConfig
 from .envs.randomize import DomainRandConfig
 from .envs.rewards import RewardConfig
 from .sensors.depth_arc import DepthArcParams
+from .sensors.odometry import OdometryParams
 from .sensors.ultrasonic import UltrasonicParams
 from .world.generators import ArenaParams
 
@@ -30,6 +31,7 @@ SECTIONS: dict[str, type] = {
     "car": CarParams,
     "depth": DepthArcParams,
     "ultrasonic": UltrasonicParams,
+    "odometry": OdometryParams,
     "obs": ObsConfig,
     "reward": RewardConfig,
     "arena": ArenaParams,
