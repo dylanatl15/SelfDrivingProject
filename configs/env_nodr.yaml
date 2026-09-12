@@ -1,0 +1,14 @@
+# Same as env_phase1 but with randomization off and a simpler arena.
+# Used for the first training run: if the policy cannot stop crashing here, the problem
+# is the reward or the hyperparameters, not the sim-to-real hardening.
+dt: 0.0333
+max_steps: 1000
+
+arena:
+  kind: outdoor
+  size_min: 10.0
+  size_max: 14.0
+  cone_density: [0.02, 0.05]
+
+domain_rand:
+  enabled: false

@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# training artifacts
+runs/
+logs/
+models/
+videos/
+*.zip
+*.onnx
+*.pkl
+*.csv
+*.mp4

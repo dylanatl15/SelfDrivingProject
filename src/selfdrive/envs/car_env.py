@@ -1,0 +1,263 @@
+"""Phase 1 Gymnasium environment: drive forward, do not crash, never stay stuck.
+
+Design notes worth knowing before changing anything here:
+
+*   `render_mode` defaults to `None` and pygame is imported lazily inside `render()`, so
+    the 20 training workers never touch it. Visualisation is an evaluation activity.
+*   Rewards read ground-truth geometry while observations read noisy sensors. That split
+    is intentional: reward computed from corrupted sensors trains the policy to chase its
+    own sensor artifacts, and privileged information at training time is free.
+*   Every episode resamples domain randomization from `self.np_random`, so a given seed
+    reproduces the whole episode - arena, car, noise - exactly.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field, replace
+
+import gymnasium as gym
+import numpy as np
+from gymnasium import spaces
+
+from ..dynamics.base import CarParams
+from ..dynamics.bicycle import KinematicBicycle
+from ..sensors.depth_arc import DepthArc, DepthArcParams
+from ..sensors.ultrasonic import UltrasonicArray, UltrasonicParams
+from ..world.generators import ArenaParams, make_arena, sample_spawn
+from .obs import ObsConfig, ObservationBuilder
+from .randomize import DomainRandConfig
+from .rewards import RewardConfig, RewardFunction
+
+# Action layout. Kept as constants because the Android app indexes the same order.
+STEER = 0
+THROTTLE = 1
+
+
+@dataclass
+class EnvConfig:
+    car: CarParams = field(default_factory=CarParams)
+    depth: DepthArcParams = field(default_factory=DepthArcParams)
+    ultrasonic: UltrasonicParams = field(default_factory=UltrasonicParams)
+    obs: ObsConfig = field(default_factory=ObsConfig)
+    reward: RewardConfig = field(default_factory=RewardConfig)
+    arena: ArenaParams = field(default_factory=lambda: ArenaParams(kind="random"))
+    domain_rand: DomainRandConfig = field(default_factory=DomainRandConfig)
+    dt: float = 1.0 / 30.0
+    max_steps: int = 1500  # ~50 s at 30 Hz
+
+
+class CarEnv(gym.Env):
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
+
+    def __init__(self, config: EnvConfig | None = None, render_mode: str | None = None):
+        super().__init__()
+        self.cfg = config or EnvConfig()
+        self.render_mode = render_mode
+        self._viewer = None  # built on first render(), never in a training worker
+        self.hud_overlay: list[str] = []  # extra viewport lines, set by eval/watch.py
+
+        self.obs_builder = ObservationBuilder(self.cfg.obs)
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
+        self.observation_space = spaces.Box(
+            low=-1.0, high=1.0, shape=(self.obs_builder.size,), dtype=np.float32
+        )
+
+        # Populated by reset(); declared here so attribute errors surface early.
+        self.world = None
+        self.car: KinematicBicycle | None = None
+        self.depth: DepthArc | None = None
+        self.ultra: UltrasonicArray | None = None
+        self.reward_fn = RewardFunction(self.cfg.reward)
+        self.dt = self.cfg.dt
+        self.steps = 0
+        self._last_action = np.zeros(2, dtype=np.float32)
+        self._episode: dict[str, float] = {}
+
+    # --- episode setup -------------------------------------------------------
+
+    def _apply_randomization(self) -> dict[str, float] | None:
+        c = self.cfg
+        d = c.domain_rand.sample(self.np_random)
+
+        if d is None:
+            # Randomization off: run exactly the car the config describes.
+            self.dt = c.dt
+            self.car = KinematicBicycle(c.car)
+            self.depth = DepthArc(c.depth)
+            self.ultra = UltrasonicArray(c.ultrasonic)
+            return None
+
+        self.dt = d["dt"]
+        car = replace(
+            c.car,
+            wheelbase=c.car.wheelbase * d["wheelbase_scale"],
+            accel_tau=d["accel_tau"],
+            steer_rate_rad_s=d["steer_rate_rad_s"],
+            steer_trim_rad=d["steer_trim_rad"],
+            max_steer_rad=d["max_steer_rad"],
+            throttle_deadband=d["throttle_deadband"],
+            throttle_gain=d["throttle_gain"],
+            understeer=d["understeer"],
+            max_speed_fwd=d["max_speed_fwd"],
+        )
+        depth = replace(
+            c.depth,
+            fov_deg=d["depth_fov_deg"],
+            max_range=d["depth_max_range"],
+            noise_frac=d["depth_noise_frac"],
+            dropout_prob=d["depth_dropout"],
+            stationary_dropout=d["depth_stationary_dropout"],
+            latency_steps=d["depth_latency_steps"],
+        )
+        ultra = replace(
+            c.ultrasonic,
+            noise_m=d["ultra_noise_m"],
+            dropout_prob=d["ultra_dropout"],
+            update_hz=d["ultra_update_hz"],
+        )
+
+        self.car = KinematicBicycle(car)
+        self.depth = DepthArc(depth)
+        self.ultra = UltrasonicArray(ultra)
+        return d
+
+    def reset(self, *, seed: int | None = None, options: dict | None = None):
+        """Options: `world` pins the arena and `pose` pins the start pose.
+
+        Both exist for the hand-authored evaluation scenarios (dead-end corridor, U-trap
+        and friends), which have to place the car in an exact spot to test anything, and
+        for tests that need a known starting condition.
+        """
+        super().reset(seed=seed)
+        self._apply_randomization()
+        options = options or {}
+
+        self.world = options.get("world") or make_arena(self.np_random, self.cfg.arena)
+        pose = options.get("pose")
+        if pose is not None:
+            x, y, theta = (float(v) for v in pose)
+        else:
+            x, y, theta = sample_spawn(
+                self.world,
+                self.np_random,
+                self.car.p.length,
+                self.car.p.width,
+                self.cfg.arena.spawn_clearance,
+            )
+
+        self.car.reset(x, y, theta)
+        self.depth.reset(self.np_random)
+        self.ultra.reset(self.np_random)
+        self.reward_fn.reset(x, y)
+        self.steps = 0
+        self._last_action[:] = 0.0
+        self._episode = {
+            "distance": 0.0,
+            "speed_sum": 0.0,
+            "min_clearance": math.inf,
+            "stall_steps": 0.0,
+            "reverse_steps": 0.0,
+            "collided": 0.0,
+        }
+
+        obs = self.obs_builder.reset(self._frame())
+        return obs, {"arena_primitives": self.world.n_primitives}
+
+    # --- stepping ------------------------------------------------------------
+
+    def _frame(self) -> np.ndarray:
+        s = self.car.state
+        depth = self.depth.sample(self.world, s, self.dt, self.np_random)
+        ultra = self.ultra.sample(self.world, s, self.dt, self.np_random)
+        if self.ultra.n < self.cfg.obs.n_ultrasonic:
+            # A 3-sensor build still has to fill a fixed-width observation slot.
+            ultra = np.concatenate([ultra, np.full(self.cfg.obs.n_ultrasonic - self.ultra.n,
+                                                   self.ultra.p.max_range)])
+        return self.obs_builder.frame(
+            depth=depth,
+            depth_confidence=self.depth.confidence,
+            ultrasonic=ultra,
+            speed=s.speed,
+            steer=s.steer,
+            last_throttle=float(self._last_action[THROTTLE]),
+            last_steer=float(self._last_action[STEER]),
+        )
+
+    def step(self, action):
+        action = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
+        prev_steer_cmd = float(self._last_action[STEER])
+        p = self.car.p
+
+        # Worlds are static unless a scenario says otherwise (the moving-obstacle test
+        # defines update(); everything else leaves the geometry fast path untouched).
+        world_update = getattr(self.world, "update", None)
+        if world_update is not None:
+            world_update(self.steps * self.dt)
+
+        before = np.array([self.car.state.x, self.car.state.y])
+        state = self.car.step(float(action[STEER]), float(action[THROTTLE]), self.dt)
+        after = np.array([state.x, state.y])
+
+        collided = self.world.collides(state.x, state.y, state.theta, p.length, p.width)
+        clearance = self.world.clearance(state.x, state.y, state.theta, p.length, p.width)
+
+        reward, terms = self.reward_fn(
+            x=state.x,
+            y=state.y,
+            throttle_cmd=float(action[THROTTLE]),
+            steer_cmd=float(action[STEER]),
+            prev_steer_cmd=prev_steer_cmd,
+            clearance=clearance,
+            collided=collided,
+            dt=self.dt,
+        )
+
+        self._last_action = action
+        self.steps += 1
+        self._episode["distance"] += float(np.linalg.norm(after - before))
+        self._episode["speed_sum"] += abs(state.speed)
+        self._episode["min_clearance"] = min(self._episode["min_clearance"], clearance)
+        self._episode["stall_steps"] += float(terms.stall != 0.0)
+        self._episode["reverse_steps"] += float(action[THROTTLE] < 0.0)
+        self._episode["collided"] = float(collided)
+
+        obs = self.obs_builder.push(self._frame())
+        terminated = bool(collided)
+        truncated = bool(self.steps >= self.cfg.max_steps or self.reward_fn.is_stalled)
+
+        info: dict = {"reward_terms": terms.as_dict(), "clearance": clearance}
+        if terminated or truncated:
+            info["episode_metrics"] = self._summary(truncated)
+        return obs, float(reward), terminated, truncated, info
+
+    def _summary(self, truncated: bool) -> dict[str, float]:
+        n = max(self.steps, 1)
+        return {
+            "distance_m": self._episode["distance"],
+            "mean_speed_mps": self._episode["speed_sum"] / n,
+            "min_clearance_m": self._episode["min_clearance"],
+            "stall_frac": self._episode["stall_steps"] / n,
+            "reverse_frac": self._episode["reverse_steps"] / n,
+            "collided": self._episode["collided"],
+            # The two ways Phase 1 can fail, separated so evaluation can report them apart.
+            "stuck": float(truncated and self.reward_fn.is_stalled),
+            "steps": float(self.steps),
+        }
+
+    # --- rendering -----------------------------------------------------------
+
+    def render(self):
+        if self.render_mode is None:
+            return None
+        if self._viewer is None:
+            # Imported here, not at module scope: training workers must never load pygame.
+            from ..render.pygame_view import PygameView
+
+            self._viewer = PygameView(self.render_mode, self.metadata["render_fps"])
+        return self._viewer.draw(self)
+
+    def close(self):
+        if self._viewer is not None:
+            self._viewer.close()
+            self._viewer = None
