@@ -94,8 +94,9 @@ def main(argv=None) -> None:
 
     print(f"run dir      {run_dir}")
     print(f"workers      {cfg['n_envs']}   device {cfg['device']}")
+    ring = f" + {2 * env_cfg.obs.memory_sectors} memory" if env_cfg.obs.memory_sectors else ""
     print(f"observation  {env_cfg.obs.size} floats "
-          f"({env_cfg.obs.per_frame} per frame x {env_cfg.obs.frame_stack})")
+          f"({env_cfg.obs.per_frame} per frame x {env_cfg.obs.frame_stack}{ring})")
     print(f"budget       {cfg['total_timesteps']:,} steps")
 
     venv = make_vec_env(

@@ -60,6 +60,20 @@ approach rate. Two cheap additions fix that without a recurrent network:
 - **Ego state** in every frame — speed, steering angle, last action.
 - **Frame stacking**, 4 deep — supplies approach rate by difference.
 
+Stacking supplies approach rate, not space. The camera sees 55–125° and four frames span
+about 0.13 s, so a wall that leaves the field of view is gone. `phase1_v1` responded by
+sweeping its nose side to side to keep things in view. The optional **obstacle memory**
+(`obs.memory_sectors`, [`envs/memory.py`](../src/selfdrive/envs/memory.py)) addresses that
+without a recurrent network. Every new depth or ultrasonic hit is stored as a world-frame
+point for 3 s. Each step, the stored points are re-projected into 24 sectors around the
+car, giving the nearest distance per sector and that point's age.
+
+A 90-frame stack would cover the same 3 s with 1,530 inputs, each reading taken from a
+different pose, and the policy would have to learn the geometry that relates them. The
+ring is 48 inputs with that geometry already applied. Points are placed using a drifting
+odometry estimate ([`sensors/odometry.py`](../src/selfdrive/sensors/odometry.py)), because
+ARCore's pose is all the phone will have.
+
 Phase 3 (a pan-tilt camera servo) genuinely does break the Markov property: looking left
 blinds the car to the right, and no amount of stacking recovers what was never observed.
 That is when `RecurrentPPO` with `MlpLstmPolicy` earns its cost. Not before.

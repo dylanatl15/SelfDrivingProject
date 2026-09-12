@@ -6,7 +6,8 @@ the contract with the Android app, so it is spelled out here and must stay in sy
 
 Per frame (17 floats, all in [-1, 1]):
 
-    [0 : 8]   depth arc buckets, left to right across the camera's field of view
+    [0 : 8]   depth arc buckets, RIGHT to left across the camera's field of view:
+              bucket 0 is the most clockwise, since angles are left-positive
     [8]       depth confidence - collapses as the car stops, because ARCore on a
               phone with no ToF sensor computes depth from motion
     [9 : 13]  ultrasonics: front, left, right, back (3-sensor builds drop front)
@@ -16,6 +17,14 @@ Per frame (17 floats, all in [-1, 1]):
     [16]      last steering command
 
     Phase 2 appends a two-float goal block (range, bearing to the GPS pin) here.
+
+With `memory_sectors` S > 0, one obstacle-memory block of 2S floats follows the stacked
+frames. It is not stacked itself, since it already spans `memory_seconds`:
+
+    [0 : S]   distance to the nearest remembered obstacle in each sector
+    [S : 2S]  age of that obstacle
+
+Layout and rules are in `envs/memory.py`. S defaults to 0, which keeps the 68-float input.
 
 Two rules that exist for deployment rather than for training:
 
@@ -49,13 +58,19 @@ class ObsConfig:
     norm_speed_max: float = 1.50  # metres per second
     norm_steer_max: float = 0.4887  # radians, 28 degrees
 
+    # Obstacle memory, appended once after the stack. 0 disables it; 24 gives 15-degree
+    # sectors. Part of the same published interface as the constants above.
+    memory_sectors: int = 0
+    memory_seconds: float = 3.0
+    norm_memory_max: float = 5.00  # metres
+
     @property
     def per_frame(self) -> int:
         return self.n_depth + 1 + self.n_ultrasonic + 4
 
     @property
     def size(self) -> int:
-        return self.per_frame * self.frame_stack
+        return self.per_frame * self.frame_stack + 2 * self.memory_sectors
 
 
 def _unit_to_pm1(values: np.ndarray, scale: float) -> np.ndarray:
@@ -69,6 +84,7 @@ class ObservationBuilder:
     def __init__(self, config: ObsConfig | None = None):
         self.c = config or ObsConfig()
         self._stack: deque[np.ndarray] = deque(maxlen=self.c.frame_stack)
+        self._ring: np.ndarray | None = None
 
     @property
     def size(self) -> int:
@@ -107,7 +123,7 @@ class ObservationBuilder:
         out[i + 3] = np.clip(last_steer, -1.0, 1.0)
         return out
 
-    def reset(self, first_frame: np.ndarray) -> np.ndarray:
+    def reset(self, first_frame: np.ndarray, ring: np.ndarray | None = None) -> np.ndarray:
         """Prime the stack by repeating the first frame.
 
         Zero-filling would present a fabricated history - an apparent jump from
@@ -117,15 +133,31 @@ class ObservationBuilder:
         self._stack.clear()
         for _ in range(self.c.frame_stack):
             self._stack.append(first_frame.copy())
+        self._set_ring(ring)
         return self.stacked()
 
-    def push(self, frame: np.ndarray) -> np.ndarray:
+    def push(self, frame: np.ndarray, ring: np.ndarray | None = None) -> np.ndarray:
         self._stack.append(frame.copy())
+        self._set_ring(ring)
         return self.stacked()
+
+    def _set_ring(self, ring: np.ndarray | None) -> None:
+        expected = 2 * self.c.memory_sectors
+        if (0 if ring is None else len(ring)) != expected:
+            raise ValueError(f"memory ring must have {expected} floats, got "
+                             f"{None if ring is None else len(ring)}")
+        self._ring = None if ring is None else np.asarray(ring, dtype=np.float32)
 
     def stacked(self) -> np.ndarray:
-        """Oldest frame first, newest last."""
-        return np.concatenate(list(self._stack)).astype(np.float32)
+        """Oldest frame first, newest last, then the memory ring if there is one."""
+        parts = list(self._stack)
+        if self._ring is not None:
+            parts.append(self._ring)
+        return np.concatenate(parts).astype(np.float32)
+
+    def latest_ring(self) -> np.ndarray | None:
+        """The memory block the policy last received, or None without memory."""
+        return None if self._ring is None else self._ring.copy()
 
     def latest_frame(self) -> np.ndarray | None:
         """The most recent per-frame block, or None before the first reset.

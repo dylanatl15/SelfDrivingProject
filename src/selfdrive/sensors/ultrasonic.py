@@ -60,6 +60,7 @@ class UltrasonicArray:
         self._names = tuple(DEFAULT_NAMES[i] for i in keep)
         self.n = len(keep)
         self._values = np.full(self.n, self.p.max_range)
+        self._echo = np.zeros(self.n, dtype=bool)
         self._next = 0
         self._clock = 0.0
 
@@ -94,8 +95,23 @@ class UltrasonicArray:
         """Mounting point of sensor `idx` in the car's frame."""
         return self._mount(idx)
 
+    @property
+    def mounts(self) -> np.ndarray:
+        """Every mounting point in the car's frame, one row per sensor."""
+        return self._mounts.copy()
+
+    @property
+    def echo(self) -> np.ndarray:
+        """Whether each held value is an echo off something rather than a timeout.
+
+        The ESP32 reports a timeout as -1.000 and the observation turns that into max
+        range, so the value alone cannot say whether anything is there. The obstacle
+        memory needs to know."""
+        return self._echo.copy()
+
     def reset(self, rng: np.random.Generator | None = None) -> None:
         self._values = np.full(self.n, self.p.max_range)
+        self._echo = np.zeros(self.n, dtype=bool)
         self._next = 0
         self._clock = 0.0
 
@@ -119,6 +135,7 @@ class UltrasonicArray:
         hit = float(world.raycast(origins, dirs, p.max_range, normalize=False).min())
         if rng.random() < p.dropout_prob:
             return float(self._values[idx])  # echo lost, the ESP32 reports the last value
+        self._echo[idx] = hit < p.max_range
         hit = float(apply_gaussian(np.array([hit]), p.noise_m, rng)[0])
         return float(np.clip(hit, p.min_range, p.max_range))
 

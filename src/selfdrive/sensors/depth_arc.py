@@ -52,7 +52,12 @@ class DepthArc:
         self.p = params or DepthArcParams()
         self._held = np.full(self.p.n_buckets, self.p.max_range)
         self._buffer = LatencyBuffer(self.p.latency_steps, (self.p.n_buckets,), self.p.max_range)
+        self._fresh_buffer = LatencyBuffer(self.p.latency_steps, (self.p.n_buckets,), 0.0)
         self.confidence = 1.0
+        # Per bucket of the last returned frame: a new measurement that hit something. A
+        # held value was taken from an earlier pose and a max-range bucket hit nothing, so
+        # the obstacle memory stores neither. Delayed exactly like the ranges.
+        self.fresh = np.zeros(self.p.n_buckets, dtype=bool)
 
         # Ray angles are fixed for the life of this sensor (a new DepthArc is built each
         # episode when randomization redraws the FOV), so they are computed once. Doing
@@ -66,6 +71,7 @@ class DepthArc:
         spread = (np.zeros(1) if p.rays_per_bucket == 1
                   else np.linspace(-bucket / 2.0, bucket / 2.0, p.rays_per_bucket))
         self._ray_offsets = (centres[:, None] + spread[None, :]).ravel()
+        self.bucket_angles = centres  # relative to the heading, left positive
         self._n_rays = self._ray_offsets.size
         self._dirs = np.empty((self._n_rays, 2))
         self._origins = np.empty((self._n_rays, 2))
@@ -74,7 +80,9 @@ class DepthArc:
         p = self.p
         self._held = np.full(p.n_buckets, p.max_range)
         self._buffer = LatencyBuffer(p.latency_steps, (p.n_buckets,), p.max_range)
+        self._fresh_buffer = LatencyBuffer(p.latency_steps, (p.n_buckets,), 0.0)
         self.confidence = 1.0
+        self.fresh = np.zeros(p.n_buckets, dtype=bool)
 
     def true_ranges(self, world: World, state: VehicleState) -> np.ndarray:
         """Noise-free closest distance per bucket. Used by the renderer and by tests."""
@@ -97,14 +105,16 @@ class DepthArc:
                rng: np.random.Generator) -> np.ndarray:
         p = self.p
         ranges = self.true_ranges(world, state)
+        hit = ranges < p.max_range
 
         # Motion stereo needs translation; confidence collapses as the car stops.
         self.confidence = float(np.clip(abs(state.speed) / max(p.speed_ref, 1e-6), 0.0, 1.0))
         drop_prob = p.dropout_prob + (1.0 - self.confidence) * p.stationary_dropout
 
         ranges = apply_relative_gaussian(ranges, p.noise_frac, rng)
-        ranges, _ = apply_dropout(ranges, self._held, drop_prob, rng)
+        ranges, dropped = apply_dropout(ranges, self._held, drop_prob, rng)
         ranges = np.clip(ranges, p.min_range, p.max_range)
 
         self._held = ranges.copy()
+        self.fresh = self._fresh_buffer.push_pop(hit & ~dropped) > 0.5
         return self._buffer.push_pop(ranges)

@@ -7,6 +7,8 @@ Design notes worth knowing before changing anything here:
 *   Rewards read ground-truth geometry while observations read noisy sensors. That split
     is intentional: reward computed from corrupted sensors trains the policy to chase its
     own sensor artifacts, and privileged information at training time is free.
+    The obstacle memory, when enabled, is an observation too: it places points using an
+    odometry estimate that drifts, never the true pose.
 *   Every episode resamples domain randomization from `self.np_random`, so a given seed
     reproduces the whole episode - arena, car, noise - exactly.
 """
@@ -14,6 +16,7 @@ Design notes worth knowing before changing anything here:
 from __future__ import annotations
 
 import math
+from collections import deque
 from dataclasses import dataclass, field, replace
 
 import gymnasium as gym
@@ -23,8 +26,10 @@ from gymnasium import spaces
 from ..dynamics.base import CarParams
 from ..dynamics.bicycle import KinematicBicycle
 from ..sensors.depth_arc import DepthArc, DepthArcParams
+from ..sensors.odometry import Odometry, OdometryParams
 from ..sensors.ultrasonic import UltrasonicArray, UltrasonicParams
 from ..world.generators import ArenaParams, make_arena, sample_spawn
+from .memory import EgoMemory
 from .obs import ObsConfig, ObservationBuilder
 from .randomize import DomainRandConfig
 from .rewards import RewardConfig, RewardFunction
@@ -39,12 +44,22 @@ class EnvConfig:
     car: CarParams = field(default_factory=CarParams)
     depth: DepthArcParams = field(default_factory=DepthArcParams)
     ultrasonic: UltrasonicParams = field(default_factory=UltrasonicParams)
+    odometry: OdometryParams = field(default_factory=OdometryParams)
     obs: ObsConfig = field(default_factory=ObsConfig)
     reward: RewardConfig = field(default_factory=RewardConfig)
     arena: ArenaParams = field(default_factory=lambda: ArenaParams(kind="random"))
     domain_rand: DomainRandConfig = field(default_factory=DomainRandConfig)
     dt: float = 1.0 / 30.0
     max_steps: int = 1500  # ~50 s at 30 Hz
+
+
+def _to_world(body: np.ndarray, x: float, y: float, theta: float) -> np.ndarray:
+    """Car-frame points (rows of forward, left) to the frame the pose is expressed in."""
+    c, s = math.cos(theta), math.sin(theta)
+    out = np.empty_like(body)
+    out[:, 0] = x + c * body[:, 0] - s * body[:, 1]
+    out[:, 1] = y + s * body[:, 0] + c * body[:, 1]
+    return out
 
 
 class CarEnv(gym.Env):
@@ -73,6 +88,16 @@ class CarEnv(gym.Env):
         self.steps = 0
         self._last_action = np.zeros(2, dtype=np.float32)
         self._episode: dict[str, float] = {}
+
+        # Obstacle memory exists only when the observation has a slot for it.
+        o = self.cfg.obs
+        self.memory: EgoMemory | None = None
+        self.odometry: Odometry | None = None
+        if o.memory_sectors:
+            self.memory = EgoMemory(
+                o.memory_sectors, o.memory_seconds, o.norm_memory_max,
+                points_per_step=self.cfg.depth.n_buckets + self.cfg.ultrasonic.n_sensors,
+            )
 
     # --- episode setup -------------------------------------------------------
 
@@ -150,6 +175,8 @@ class CarEnv(gym.Env):
         self.depth.reset(self.np_random)
         self.ultra.reset(self.np_random)
         self.reward_fn.reset(x, y, theta, self.world.bounds)
+        if self.memory is not None:
+            self._reset_memory(x, y, theta)
         self.steps = 0
         self._last_action[:] = 0.0
         self._episode = {
@@ -161,20 +188,44 @@ class CarEnv(gym.Env):
             "collided": 0.0,
         }
 
-        obs = self.obs_builder.reset(self._frame())
+        obs = self.obs_builder.reset(*self._frame())
         return obs, {"arena_primitives": self.world.n_primitives}
+
+    def _reset_memory(self, x: float, y: float, theta: float) -> None:
+        # A child generator for everything odometry draws. Spawning one leaves `np_random`
+        # untouched, so a seed produces the same arena, car and sensor noise with the memory
+        # on as with it off, and the two policies can be compared on identical episodes.
+        self._odometry_rng = self.np_random.spawn(1)[0]
+        drawn = self.cfg.domain_rand.sample_odometry(self._odometry_rng)
+        params = self.cfg.odometry if drawn is None else replace(self.cfg.odometry, **drawn)
+        self.odometry = Odometry(params)
+        self.odometry.reset(x, y, theta)
+        self.memory.reset(self.dt)
+
+        # Sensor geometry in the car's frame, fixed once randomization has drawn the FOV.
+        a = self.depth.bucket_angles
+        self._depth_dirs = np.column_stack([np.cos(a), np.sin(a)])
+        self._depth_mount = np.array([self.depth.p.mount_forward, 0.0])
+        a = self.ultra.angles
+        self._ultra_dirs = np.column_stack([np.cos(a), np.sin(a)])
+        self._ultra_mounts = self.ultra.mounts
+        self._ultra_last = np.full(self.ultra.n, np.nan)
+        lag = self.depth.p.latency_steps + 1
+        self._capture_poses = deque([(float(x), float(y), float(theta), 0.0)] * lag, maxlen=lag)
 
     # --- stepping ------------------------------------------------------------
 
-    def _frame(self) -> np.ndarray:
+    def _frame(self) -> tuple[np.ndarray, np.ndarray | None]:
+        """Sample the sensors once; return this step's frame and the memory ring."""
         s = self.car.state
         depth = self.depth.sample(self.world, s, self.dt, self.np_random)
         ultra = self.ultra.sample(self.world, s, self.dt, self.np_random)
+        ring = self._remember(depth, ultra) if self.memory is not None else None
         if self.ultra.n < self.cfg.obs.n_ultrasonic:
             # A 3-sensor build still has to fill a fixed-width observation slot.
             ultra = np.concatenate([ultra, np.full(self.cfg.obs.n_ultrasonic - self.ultra.n,
                                                    self.ultra.p.max_range)])
-        return self.obs_builder.frame(
+        frame = self.obs_builder.frame(
             depth=depth,
             depth_confidence=self.depth.confidence,
             ultrasonic=ultra,
@@ -183,6 +234,36 @@ class CarEnv(gym.Env):
             last_throttle=float(self._last_action[THROTTLE]),
             last_steer=float(self._last_action[STEER]),
         )
+        return frame, ring
+
+    def _remember(self, depth: np.ndarray, ultra: np.ndarray) -> np.ndarray:
+        """Store this step's new obstacle readings and return the ring the policy sees."""
+        odo, now = self.odometry, self.steps * self.dt
+        # Depth arrives `latency_steps` late, so it is placed from the pose it was captured at.
+        self._capture_poses.append((odo.x, odo.y, odo.theta, now))
+        cx, cy, ctheta, captured = self._capture_poses[0]
+
+        # Only new measurements are stored: a held reading was taken from an earlier pose,
+        # and storing it again at this one smears the obstacle along the car's path. For an
+        # ultrasonic, "new" means "changed" - the one test the phone can apply to $T
+        # telemetry, where a sensor waiting for its round-robin turn repeats its last value.
+        changed = ultra != self._ultra_last
+        self._ultra_last = ultra.copy()
+
+        if odo.tracking:
+            # Cut at the observation's ranges, which are the only ranges the phone knows.
+            o = self.cfg.obs
+            d_ok = self.depth.fresh & (depth < o.norm_depth_max)
+            u_ok = changed & self.ultra.echo & (ultra < o.norm_ultra_max)
+            seen = self._depth_mount + depth[d_ok, None] * self._depth_dirs[d_ok]
+            felt = self._ultra_mounts[u_ok] + ultra[u_ok, None] * self._ultra_dirs[u_ok]
+            points = np.concatenate([_to_world(seen, cx, cy, ctheta),
+                                     _to_world(felt, odo.x, odo.y, odo.theta)])
+            stamps = np.concatenate([np.full(len(seen), captured), np.full(len(felt), now)])
+        else:
+            points, stamps = np.empty((0, 2)), np.empty(0)
+        self.memory.insert(points, stamps)
+        return self.memory.ring(odo.x, odo.y, odo.theta, now)
 
     def step(self, action):
         action = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
@@ -223,7 +304,11 @@ class CarEnv(gym.Env):
         self._episode["reverse_steps"] += float(action[THROTTLE] < 0.0)
         self._episode["collided"] = float(collided)
 
-        obs = self.obs_builder.push(self._frame())
+        if self.memory is not None and self.odometry.update(
+            state.x, state.y, state.theta, self.dt, self._odometry_rng
+        ):
+            self.memory.clear()  # tracking lost: nothing stored relates to the new pose
+        obs = self.obs_builder.push(*self._frame())
         terminated = bool(collided)
         truncated = bool(self.steps >= self.cfg.max_steps or self.reward_fn.is_stalled)
 

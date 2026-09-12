@@ -12,6 +12,11 @@ be silently wrong.
 Under everything sits the ground the explore reward has already paid for, bright where the
 car has just been and dimmer with age. A car that orbits shows up at once as a ring that
 stops growing. Press C to toggle it.
+
+With the obstacle memory on, remembered points are drawn as violet dots, placed where the
+car *believes* they are: relative to the drifting odometry pose, then drawn around the
+true car. Drift shows as dots peeling away from the walls they came from. Hollow circles
+mark the nearest point per sector as the policy received it. Press M to toggle.
 """
 
 from __future__ import annotations
@@ -35,6 +40,9 @@ WARN = (250, 200, 90)
 PAINT_NEW = (64, 168, 128)
 PAINT_OLD = (36, 66, 60)
 PAINT_FADE_S = 8.0  # seconds for covered ground to fade from PAINT_NEW to PAINT_OLD
+MEMORY_NEW = (196, 150, 255)
+MEMORY_OLD = (82, 64, 118)
+MEMORY_NEAR = (236, 222, 255)
 
 
 class PygameView:
@@ -57,6 +65,7 @@ class PygameView:
             self.clock = None
         self.font = pygame.font.SysFont("monospace", 14)
         self.show_coverage = True
+        self.show_memory = True
 
     # --- world <-> screen ----------------------------------------------------
 
@@ -89,6 +98,8 @@ class PygameView:
                     raise SystemExit(0)
                 if event.type == pg.KEYDOWN and event.key == pg.K_c:
                     self.show_coverage = not self.show_coverage
+                if event.type == pg.KEYDOWN and event.key == pg.K_m:
+                    self.show_memory = not self.show_memory
 
         world, car = env.world, env.car
         s = car.state
@@ -106,6 +117,8 @@ class PygameView:
             centre = self._to_screen(np.array([[cx, cy]]), t)[0]
             pg.draw.circle(self.screen, CONE, centre, max(int(r * scale), 2))
 
+        if self.show_memory:
+            self._draw_memory(env, t)
         self._draw_depth(env, t)
         self._draw_ultrasonic(env, t)
 
@@ -158,6 +171,36 @@ class PygameView:
         # crop is half a pixel left of its first column and above its last row.
         corner = np.array([[ox + (x0 - 0.5) * res, oy + (y0 + h - 0.5) * res]])
         self.screen.blit(pg.transform.scale(surf, size), self._to_screen(corner, t)[0])
+
+    def _draw_memory(self, env, t):
+        memory = getattr(env, "memory", None)
+        if memory is None:
+            return
+        pg = self.pygame
+        s, odo = env.car.state, env.odometry
+
+        points, age = memory.live(env.steps * env.dt)
+        if len(age):
+            # Relative to the estimated pose, then placed around the true one.
+            turn = s.theta - odo.theta
+            c, sn = math.cos(turn), math.sin(turn)
+            dx, dy = points[:, 0] - odo.x, points[:, 1] - odo.y
+            world = np.column_stack([s.x + c * dx - sn * dy, s.y + sn * dx + c * dy])
+            fade = np.clip(age / memory.seconds, 0.0, 1.0)[:, None]
+            colours = ((1.0 - fade) * np.array(MEMORY_NEW) + fade * np.array(MEMORY_OLD))
+            for pt, colour in zip(self._to_screen(world, t), colours.astype(int).tolist(),
+                                  strict=True):
+                pg.draw.circle(self.screen, colour, pt, 2)
+
+        ring = env.obs_builder.latest_ring()
+        if ring is None:
+            return
+        n = memory.sectors
+        for i in np.flatnonzero(ring[:n] < 1.0):
+            d = (float(ring[i]) + 1.0) / 2.0 * memory.norm_max
+            bearing = s.theta + i * 2.0 * math.pi / n
+            pt = np.array([[s.x + d * math.cos(bearing), s.y + d * math.sin(bearing)]])
+            pg.draw.circle(self.screen, MEMORY_NEAR, self._to_screen(pt, t)[0], 5, 1)
 
     def _draw_depth(self, env, t):
         pg = self.pygame
@@ -213,8 +256,15 @@ class PygameView:
             f"stalled {env.reward_fn.stalled_steps:3d}/{env.cfg.reward.stall_limit}   "
             f"coverage {env.reward_fn.coverage_m2:5.1f} m2",
         ]
+        odo = getattr(env, "odometry", None)
+        if getattr(env, "memory", None) is not None and odo is not None:
+            n = len(env.memory.live(env.steps * env.dt)[1])
+            drift = math.hypot(odo.x - s.x, odo.y - s.y)
+            lines.append(f"memory {n:4d} pts   odom drift {drift:4.2f} m"
+                         + ("" if odo.tracking else "   TRACKING LOST"))
         for i, text in enumerate(lines):
-            colour = WARN if "stalled" in text and env.reward_fn.stalled_steps > 0 else TEXT
+            warn = ("stalled" in text and env.reward_fn.stalled_steps > 0) or "LOST" in text
+            colour = WARN if warn else TEXT
             self.screen.blit(self.font.render(text, True, colour), (12, 10 + i * 18))
 
         overlay = env.hud_overlay
