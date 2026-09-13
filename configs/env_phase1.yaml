@@ -52,6 +52,7 @@ reward:
   w_retrace: 0.0        # per metre over ground already covered; env_phase1_retrace.yaml sets it
   w_reverse: 0.02
   w_oscillation: 0.05
+  w_throttle_oscillation: 0.0
   w_lateral: 0.05
   w_proximity: 0.05
   w_stall: 0.5
