@@ -62,6 +62,9 @@ def export(model_path: str | Path, out_path: str | Path, opset: int = 17) -> Pat
         output_names=["action"],
         dynamic_axes={"observation": {0: "batch"}, "action": {0: "batch"}},
         opset_version=opset,
+        # One file for the phone. torch 2.13 otherwise writes the weights to a separate
+        # `.onnx.data`, and a copied `.onnx` without it fails to load.
+        external_data=False,
     )
     return out_path
 
