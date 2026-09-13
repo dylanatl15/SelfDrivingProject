@@ -430,3 +430,11 @@ def test_waypoint_config_is_memory_light_big_plus_a_goal_and_nothing_else():
     base["reward"].pop("w_explore")
     assert ours == base
     assert load_env_config("configs/env_waypoint.yaml").obs.size == 116 + 3
+
+
+def test_waypoint_pay5_config_is_the_waypoint_config_with_five_times_the_pay():
+    base = load_yaml("configs/env_waypoint.yaml")
+    ours = load_yaml("configs/env_waypoint_pay5.yaml")
+    for key in ("w_progress", "goal_bonus"):
+        assert ours["reward"].pop(key) == 5.0 * base["reward"].pop(key)
+    assert ours == base

@@ -1,0 +1,109 @@
+# Waypoint A/B arm: env_waypoint.yaml with five times the pay for progress and goals.
+# waypoint_v1 earned about a thirtieth per step of what collisions and stalls cost it, and
+# backed away from goals. Here a crash costs 20 m of progress instead of 100. Nothing else
+# differs (pinned in tests/test_goals.py).
+
+dt: 0.0333          # 30 Hz nominal; domain randomization jitters this per episode
+max_steps: 1500     # ~50 s of driving
+
+car:
+  # Placeholders for a generic ~1/10 scale RC platform big enough to carry a phone,
+  # an ESP32 and a 2S LiPo. Replace with measured values once the chassis exists -
+  # see docs/sim2real.md for what to measure and how.
+  wheelbase: 0.25
+  length: 0.40
+  width: 0.20
+  max_steer_deg: 28.0
+  steer_rate_deg_s: 200.0
+  max_speed_fwd: 1.5
+  max_speed_rev: 0.6
+  accel_tau: 0.25
+
+depth:
+  # 69 deg is the Galaxy S21 FE main lens (26 mm equivalent) held in LANDSCAPE.
+  # Portrait is only ~50 deg. ARCore does not support the ultra-wide lens, so the
+  # 123 deg figure from the phone's spec sheet is not reachable through ARCore.
+  fov_deg: 69.0
+  n_buckets: 8
+  rays_per_bucket: 5
+  max_range: 5.0
+  mount_forward: 0.18
+
+ultrasonic:
+  n_sensors: 4          # front, left, right, back; set 3 to drop the front
+  cone_deg: 15.0
+  max_range: 4.0
+  update_hz: 20.0       # total across the round-robin, not per sensor
+
+obs:
+  n_depth: 8
+  n_ultrasonic: 4
+  frame_stack: 4
+  # Fixed normalization references. These are a published interface shared with the
+  # Android app - changing one invalidates every trained checkpoint.
+  norm_depth_max: 5.0
+  norm_ultra_max: 4.0
+  norm_speed_max: 1.5
+  norm_steer_max: 0.4887
+  # Obstacle memory ring, appended after the stack: 68 + 2 x 24 = 116 inputs.
+  # Rules for the phone: docs/memory-ring.md.
+  memory_sectors: 24
+  memory_seconds: 3.0
+  norm_memory_max: 5.0
+  # Goal block, appended last: 116 + 3 = 119 inputs. Rules for the phone: docs/goal-block.md.
+  goal_block: true
+  norm_goal_max: 15.0
+
+reward:
+  # Path distance closed toward the goal replaces new ground as the drive signal, so a 1 m
+  # gap on the way to a goal is worth driving through. See the docstring in envs/rewards.py.
+  w_explore: 0.0        # coverage is still measured, just not paid
+  w_progress: 5.0       # per metre of path distance closed; five times env_waypoint.yaml
+  goal_bonus: 25.0      # per goal reached, on top of the progress that got there
+  w_retrace: 0.0        # per metre over ground already covered; env_phase1_retrace.yaml sets it
+  w_reverse: 0.02
+  w_oscillation: 0.05
+  w_throttle_oscillation: 0.05
+  w_lateral: 0.05
+  w_proximity: 0.05
+  w_stall: 0.5
+  collision_penalty: 100.0
+  explore_radius: 0.25
+  explore_res: 0.05
+  revisit_s: 60.0       # longer than an episode, so a loop of any size pays for one lap
+  lateral_accel_ref: 3.0
+  safe_distance: 0.6
+  stall_window: 45
+  stall_eps: 0.08
+  stall_limit: 90
+
+arena:
+  kind: random          # indoor | outdoor | mixed | random
+  size_min: 16.0
+  size_max: 32.0
+  walls_per_100m2: [6.0, 11.0]  # interior walls scale with floor area, not a fixed count
+  wall_length_m: [2.0, 8.0]     # in metres, not a fraction of the arena size
+  doorway_prob: 0.55
+  cone_density: [0.02, 0.10]
+  spawn_clearance: 0.5
+
+# ARCore motion tracking, as the memory and the goal block see it.
+odometry:
+  scale_error: 0.0
+  pos_noise: 0.03       # m of drift per sqrt(m) travelled
+  yaw_noise: 0.02       # rad of drift per sqrt(rad) turned
+  tracking_loss_per_s: 0.02
+  tracking_recover_s: 0.5
+
+domain_rand:
+  enabled: true
+
+# Chained goals: reach one and the next is drawn. All distances are true path metres.
+goal:
+  radius: 0.5           # arrived within this of the goal centre
+  distance_min: 2.0     # path distance from the car to a new goal
+  distance_max: 12.0
+  clearance: 0.5        # no goal closer than this to any obstacle
+  grid_res: 0.075       # navigation raster; doorways from 0.30 m always pass at this size
+  turn_radius: 0.70     # plan with the least agile randomized car: 0.275 m wheelbase, 22 deg
+  headings: 16          # heading steps in the pose lattice
