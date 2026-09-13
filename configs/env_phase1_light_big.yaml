@@ -11,6 +11,10 @@
 #   env_phase1_light       0.421     0.037
 #   this file              0.425     0.039
 #
+# What the car feels, from 96 seeds of reachable space with the car at a random heading: the
+# share of it at a clearance of <0.5 / 0.5-1 / 1-2 / 2-3 / >=3 m is 38 / 29 / 26 / 6 / 1 % in
+# env_phase1_light (median 0.68 m) and 43 / 27 / 22 / 6 / 2 % here (median 0.61 m).
+#
 # max_steps is unchanged, so an episode reaches a smaller share of the arena and has less
 # reason to cover ground twice.
 
