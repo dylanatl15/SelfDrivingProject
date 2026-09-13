@@ -51,7 +51,8 @@ class EvalResult:
     clean_coverage_m2: float = 0.0  # the same, counting crashed and stuck episodes as zero
     mean_speed_mps: float = 0.0
     mean_min_clearance_m: float = 0.0
-    mean_reverse_frac: float = 0.0
+    mean_reverse_frac: float = 0.0  # steps commanding negative throttle, mostly braking
+    mean_backing_frac: float = 0.0  # steps actually rolling backwards
     mean_retrace_frac: float = 0.0  # share of the swath driven over ground already covered
     mean_lock_frac: float = 0.0  # share of steps driving forward at near-full steering lock
     mean_steps: float = 0.0
@@ -65,7 +66,8 @@ class EvalResult:
             f"collision {self.collision_rate:6.1%}  stuck {self.stuck_rate:6.1%}  "
             f"dist {self.mean_distance_m:6.2f} m  cover {self.mean_coverage_m2:6.1f} m2  "
             f"clean {self.clean_coverage_m2:5.1f} m2  speed {self.mean_speed_mps:5.2f} m/s  "
-            f"reverse {self.mean_reverse_frac:5.1%}  retrace {self.mean_retrace_frac:5.1%}  "
+            f"reverse {self.mean_reverse_frac:5.1%}  backing {self.mean_backing_frac:5.1%}  "
+            f"retrace {self.mean_retrace_frac:5.1%}  "
             f"lock {self.mean_lock_frac:5.1%}"
         )
 
@@ -128,6 +130,7 @@ def run_episodes(
         mean_speed_mps=mean("mean_speed_mps"),
         mean_min_clearance_m=mean("min_clearance_m"),
         mean_reverse_frac=mean("reverse_frac"),
+        mean_backing_frac=mean("backing_frac"),
         mean_retrace_frac=mean("retrace_frac"),
         mean_lock_frac=mean("lock_frac"),
         mean_steps=mean("steps"),

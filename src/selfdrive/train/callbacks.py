@@ -56,7 +56,8 @@ class EpisodeCsvLogger(BaseCallback):
 
     FIELDS = [
         "timesteps", "wall_s", "distance_m", "coverage_m2", "mean_speed_mps", "min_clearance_m",
-        "stall_frac", "reverse_frac", "lock_frac", "retrace_frac", "collided", "stuck", "steps",
+        "stall_frac", "reverse_frac", "backing_frac", "lock_frac", "retrace_frac", "collided",
+        "stuck", "steps",
     ]
 
     def __init__(self, path: str | Path, start_timesteps: int = 0, verbose: int = 0):

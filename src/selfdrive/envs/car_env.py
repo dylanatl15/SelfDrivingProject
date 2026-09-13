@@ -185,6 +185,7 @@ class CarEnv(gym.Env):
             "min_clearance": math.inf,
             "stall_steps": 0.0,
             "reverse_steps": 0.0,
+            "backing_steps": 0.0,
             "lock_steps": 0.0,
             "collided": 0.0,
         }
@@ -269,6 +270,7 @@ class CarEnv(gym.Env):
     def step(self, action):
         action = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
         prev_steer_cmd = float(self._last_action[STEER])
+        prev_throttle_cmd = float(self._last_action[THROTTLE])
         p = self.car.p
 
         # Worlds are static unless a scenario says otherwise (the moving-obstacle test
@@ -289,6 +291,7 @@ class CarEnv(gym.Env):
             y=state.y,
             theta=state.theta,
             throttle_cmd=float(action[THROTTLE]),
+            prev_throttle_cmd=prev_throttle_cmd,
             steer_cmd=float(action[STEER]),
             prev_steer_cmd=prev_steer_cmd,
             clearance=clearance,
@@ -302,7 +305,9 @@ class CarEnv(gym.Env):
         self._episode["speed_sum"] += abs(state.speed)
         self._episode["min_clearance"] = min(self._episode["min_clearance"], clearance)
         self._episode["stall_steps"] += float(terms.stall != 0.0)
+        # A negative throttle command is mostly braking; backing is the car rolling backwards.
         self._episode["reverse_steps"] += float(action[THROTTLE] < 0.0)
+        self._episode["backing_steps"] += float(state.speed < -0.05)
         # Forward at near-full steering lock: how phase1_v2 circled open patches.
         self._episode["lock_steps"] += float(abs(action[STEER]) > 0.8 and action[THROTTLE] > 0)
         self._episode["collided"] = float(collided)
@@ -330,6 +335,7 @@ class CarEnv(gym.Env):
             "min_clearance_m": self._episode["min_clearance"],
             "stall_frac": self._episode["stall_steps"] / n,
             "reverse_frac": self._episode["reverse_steps"] / n,
+            "backing_frac": self._episode["backing_steps"] / n,
             "lock_frac": self._episode["lock_steps"] / n,
             "retrace_frac": self.reward_fn.retrace_frac,
             "collided": self._episode["collided"],
