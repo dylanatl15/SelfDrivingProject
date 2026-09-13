@@ -379,3 +379,11 @@ def test_retrace_config_is_phase1_with_only_w_retrace_changed():
     assert retrace == base
     loaded = load_env_config(CONFIGS / "env_phase1_retrace.yaml")
     assert loaded.reward.w_retrace == RETRACE.w_retrace
+
+
+def test_crash25_config_is_phase1_with_only_collision_penalty_changed():
+    base = yaml.safe_load((CONFIGS / "env_phase1.yaml").read_text())
+    crash25 = yaml.safe_load((CONFIGS / "env_phase1_crash25.yaml").read_text())
+    assert base["reward"].pop("collision_penalty") == 100.0
+    assert crash25["reward"].pop("collision_penalty") == 25.0
+    assert crash25 == base
