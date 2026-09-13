@@ -158,6 +158,7 @@ class CarEnv(gym.Env):
             "min_clearance": math.inf,
             "stall_steps": 0.0,
             "reverse_steps": 0.0,
+            "lock_steps": 0.0,
             "collided": 0.0,
         }
 
@@ -221,6 +222,8 @@ class CarEnv(gym.Env):
         self._episode["min_clearance"] = min(self._episode["min_clearance"], clearance)
         self._episode["stall_steps"] += float(terms.stall != 0.0)
         self._episode["reverse_steps"] += float(action[THROTTLE] < 0.0)
+        # Forward at near-full steering lock: how phase1_v2 circled open patches.
+        self._episode["lock_steps"] += float(abs(action[STEER]) > 0.8 and action[THROTTLE] > 0)
         self._episode["collided"] = float(collided)
 
         obs = self.obs_builder.push(self._frame())
@@ -242,6 +245,8 @@ class CarEnv(gym.Env):
             "min_clearance_m": self._episode["min_clearance"],
             "stall_frac": self._episode["stall_steps"] / n,
             "reverse_frac": self._episode["reverse_steps"] / n,
+            "lock_frac": self._episode["lock_steps"] / n,
+            "retrace_frac": self.reward_fn.retrace_frac,
             "collided": self._episode["collided"],
             # The two ways Phase 1 can fail, separated so evaluation can report them apart.
             "stuck": float(truncated and self.reward_fn.is_stalled),

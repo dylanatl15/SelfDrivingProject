@@ -40,6 +40,13 @@ displacement window paid a 1-2 m orbit almost as well as a straight line. The we
 pinned because a per-cell coverage grid, which looks isotropic, paid it more than a line. If a reward tweak
 breaks one of those, the tweak is wrong, not the test.
 
+`phase1_v2` found the next hole. Paying only for new ground makes every lap after the
+first free, and a collision costs as much as 100 m of new ground, so it circled open
+patches at near-full steering lock. `w_retrace` charges for ground covered again: it is 0
+in `env_phase1.yaml` and 0.5 in `env_phase1_retrace.yaml` until `phase1_v3a` and
+`phase1_v3b` show whether it is needed. Best models are kept by `clean_coverage_m2`, not
+success rate, because a car that circles never fails.
+
 ## Throughput ceiling - do not chase it
 
 `python -m selfdrive.train.bench` reports ~900 steps/s single-process and ~4,800 across
