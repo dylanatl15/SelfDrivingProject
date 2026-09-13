@@ -1,0 +1,49 @@
+# phase1_v5 / phase1_mem_v2: train_ppo_v4.yaml plus a small entropy bonus.
+#
+# v4 bounded actions with tanh and dropped the bonus. By 1M both runs had pushed the
+# steering mean past tanh's knee (|mean| > 2 on 53-57 % of visited states), so sampled
+# steering spread per state fell from ~0.5 to 0.16. It was a collapse like v2's, into
+# full-lock left/right flips at ~2.7/s, and phase1_mem_v1 had started circling (orbit
+# windows 11 -> 20 % from 0.5M to 1M).
+#
+# With squashing, SB3 estimates entropy as -log_prob including the log(1 - tanh^2)
+# correction, so the bonus pushes a saturated mean back toward the middle. It cannot run
+# away the way v3's did: a squashed distribution's entropy is bounded.
+#
+# phase1_v5 (env_phase1.yaml) and phase1_mem_v2 (env_phase1_memory.yaml on the memory-ring
+# branch) run side by side, 10 workers each, and differ only in the obstacle memory.
+
+env_config: configs/env_phase1.yaml
+n_envs: 10
+total_timesteps: 20000000
+seed: 0
+device: cpu
+
+policy: MlpPolicy
+net_arch: [256, 256]
+
+n_steps: 1024           # x 10 workers = 10240 samples
+batch_size: 2048
+n_epochs: 10
+learning_rate: 3.0e-4
+gamma: 0.995            # ~6.7 s horizon at 30 Hz
+gae_lambda: 0.95
+clip_range: 0.2
+target_kl: 0.03
+ent_coef: 0.005         # v4's 0.0 let the steering mean saturate tanh
+vf_coef: 0.5
+max_grad_norm: 0.5
+
+use_sde: true
+sde_sample_freq: 4      # new noise every 4 steps (0.13 s)
+squash_output: true
+log_std_init: -2.0      # gSDE scale: the noise matrix std, not the action std
+
+normalize_reward: true
+
+eval_every_steps: 500000
+eval_episodes: 20
+video_every_steps: 2000000
+video_episodes: 2
+checkpoint_every_steps: 500000
+run_dir: runs
