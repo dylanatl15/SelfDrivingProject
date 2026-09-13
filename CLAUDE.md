@@ -91,8 +91,12 @@ noise. `train_ppo_v7.yaml` sets `mean_penalty`, a quadratic charge on pre-tanh m
 Its reward pays for path distance closed, measured on a 0.2 m occupancy raster by
 `world/navigation.py`. It never pays for straight-line distance, which would reward pressing
 against the wall between the car and its goal; `tests/test_goals.py` pins the U-trap case.
-Goals are only drawn from floor the car can reach, and with goals on, the car never spawns in
-a pocket that random walls sealed off. The observation gains three floats
+Random walls also made traps: in one big-arena seed, two parallel walls 0.34 m apart with
+offset doorways boxed the spawn into about 6 m² whose only exits no car could turn through.
+So the waypoint arenas set `min_passage` 0.8, which redraws any wall or cone leaving a gap
+under 0.8 m between separate obstacles, and spawns and goals sit only on the largest stretch
+of floor joined by passages at least `drivable_width` (0.8 m) wide. Every goal has a route.
+The observation gains three floats
 (`docs/goal-block.md`, a change the Android app must mirror), and best models are kept by
 `clean_goals`.
 

@@ -22,7 +22,7 @@ import numpy as np
 
 from ..dynamics.base import wrap_angle
 from ..world.geometry import World
-from ..world.navigation import NavGrid
+from ..world.navigation import NavGrid, PathField
 
 
 @dataclass
@@ -33,6 +33,9 @@ class GoalConfig:
     clearance: float = 0.50  # a goal sits at least this far from every obstacle
     grid_res: float = 0.20  # path-distance raster cell, metres
     inflate: float = 0.20  # cells whose centre is this close to an obstacle are blocked
+    # Spawns and goals only sit on floor joined by passages at least this wide. Narrower
+    # gaps still count for path distance, so squeezing through one is never charged.
+    drivable_width: float = 0.80
 
 
 class GoalTracker:
@@ -44,6 +47,8 @@ class GoalTracker:
             # Arrival is judged by straight-line distance, which is only a path distance
             # when no obstacle can stand inside the arrival circle.
             raise ValueError("goal clearance must be at least the arrival radius")
+        if self.c.drivable_width / 2.0 < self.c.inflate:
+            raise ValueError("drivable_width must be at least twice the inflation")
         self.grid: NavGrid | None = None
         self.main: np.ndarray | None = None  # cells on the largest connected stretch of floor
         self._world: World | None = None
@@ -54,30 +59,35 @@ class GoalTracker:
         self.progress_m = 0.0
 
     def prepare(self, world: World) -> None:
-        """Build this world's raster and find its largest connected stretch of floor.
+        """Build this world's raster and find its largest stretch of drivable floor.
 
-        Random walls can seal off a pocket. A car spawned in one could reach nothing outside
-        it and would spend the episode crashing or circling, so the environment only spawns
-        where `connected` agrees. Goals are drawn from floor the car can reach, so none is
-        ever impossible.
+        Random walls can box off a pocket, sealed or joined to the rest only by a slot no
+        car could turn into. A car spawned in one spends the episode crashing or circling,
+        and a goal outside it is impossible. So the environment only spawns where
+        `connected` agrees, and goals are only drawn from that same floor. Every goal then
+        has at least one route to it with no passage narrower than `drivable_width`.
         """
         c = self.c
         self._world = world
-        self.grid = grid = NavGrid(world, c.grid_res, c.inflate, c.clearance)
-        unseen = ~grid.blocked
+        self.grid = grid = NavGrid(world, c.grid_res, c.inflate,
+                                   max(c.clearance, c.drivable_width / 2.0))
+        narrow = grid.room < c.drivable_width / 2.0
+        paths = PathField(narrow)
+        unseen = ~narrow
         self.main = np.zeros_like(unseen)
         while np.count_nonzero(unseen) > np.count_nonzero(self.main):
             # From the most open cell not yet reached, which lies in a big region if any does.
             ix, iy = divmod(int(np.argmax(np.where(unseen, grid.room, -np.inf))), grid.ny)
-            region = np.isfinite(grid.field_from(*grid.centre(ix, iy)))
+            region = np.isfinite(paths.distances((ix, iy)))
             unseen &= ~region
             if np.count_nonzero(region) > np.count_nonzero(self.main):
                 self.main = region
 
     def connected(self, x: float, y: float) -> bool:
-        """Whether (x, y) is on the largest connected stretch of floor."""
-        cell = self.grid.free_cell_near(x, y, reach=1)
-        return cell is not None and bool(self.main[cell])
+        """Whether (x, y) is on the largest stretch of drivable floor, give or take a cell."""
+        g = self.grid
+        ix, iy = round((x - g.origin[0]) / g.res), round((y - g.origin[1]) / g.res)
+        return bool(self.main[max(ix - 1, 0) : ix + 2, max(iy - 1, 0) : iy + 2].any())
 
     def reset(self, world: World, x: float, y: float, rng: np.random.Generator,
               pin: tuple[float, float] | None = None) -> None:
@@ -93,7 +103,8 @@ class GoalTracker:
 
     def _draw(self, field: np.ndarray, rng: np.random.Generator) -> tuple[float, float] | None:
         c = self.c
-        return self.grid.sample_goal(field, rng, (c.distance_min, c.distance_max), c.clearance)
+        return self.grid.sample_goal(field, rng, (c.distance_min, c.distance_max), c.clearance,
+                                     allowed=self.main)
 
     def _set_goal(self, goal: tuple[float, float] | None, x: float, y: float) -> None:
         self.goal = goal
