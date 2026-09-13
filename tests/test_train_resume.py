@@ -17,13 +17,14 @@ from selfdrive.train import train_ppo
 from selfdrive.train.callbacks import EpisodeCsvLogger, PeriodicEval
 
 
-def tiny_run_config(tmp_path, total: int):
+def tiny_run_config(tmp_path, total: int, **extra):
     cfg = {
         "env_config": "configs/env_nodr.yaml",
         "n_envs": 1, "total_timesteps": total,
         "n_steps": 64, "batch_size": 64, "n_epochs": 1, "net_arch": [16],
         "eval_every_steps": 10**9, "video_every_steps": 0,
         "checkpoint_every_steps": 128, "run_dir": str(tmp_path), "target_kl": 0.03,
+        **extra,
     }
     path = tmp_path / "train.yaml"
     path.write_text(yaml.safe_dump(cfg))
@@ -45,6 +46,18 @@ def test_resume_carries_on_the_step_count_and_restores_reward_statistics(tmp_pat
     assert (run / "checkpoints" / "ppo_384_steps.zip").exists()
     (record,) = json.loads((run / "train_config.json").read_text())["resumed"]
     assert record["steps"] == 128 and record["stats_restored"]
+
+
+def test_squashed_gsde_settings_reach_the_model_and_survive_a_resume(tmp_path):
+    config = tiny_run_config(tmp_path, 128, use_sde=True, sde_sample_freq=4,
+                             squash_output=True, log_std_init=-2.0)
+    train_ppo.main(["--config", str(config), "--name", "run"])
+    checkpoint = tmp_path / "run" / "checkpoints" / "ppo_128_steps.zip"
+    train_ppo.main(["--resume", str(checkpoint), "--total-timesteps", "256"])
+
+    model = PPO.load(tmp_path / "run" / "final_model.zip")
+    assert model.num_timesteps == 256
+    assert model.use_sde and model.sde_sample_freq == 4 and model.policy.squash_output
 
 
 def test_resume_refuses_a_checkpoint_already_past_the_budget(tmp_path):
