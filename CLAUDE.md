@@ -78,6 +78,15 @@ count scales with area there (`walls_per_100m2`) and wall length is absolute, so
 density matches `env_phase1.yaml`. A 32-seed sample said a sparser layout matched; the
 test uses 300.
 
+Squashed policies also saturate by degrees. Every gen7 run held its pre-tanh throttle mean
+at +2 to +3.6 with a wall under 1 m ahead, where every noise sample squashes to near-full
+throttle: exploration almost never braked, so PPO had no advantage signal to learn braking,
+and the crashes came at full lock and full throttle. The entropy bonus cannot pull a mean
+back. Under squashed gSDE SB3 estimates entropy from buffer actions, and that only grows the
+noise. `train_ppo_v7.yaml` sets `mean_penalty`, a quadratic charge on pre-tanh means past
+1.5 (`train/policies.py`). It rides in the entropy term, so `train/entropy_loss` includes it;
+`train/mean_penalty` and `train/pre_tanh_mean_abs` log it alone.
+
 ## Throughput ceiling - do not chase it
 
 `python -m selfdrive.train.bench` reports ~900 steps/s single-process and ~4,800 across

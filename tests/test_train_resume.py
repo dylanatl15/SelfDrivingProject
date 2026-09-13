@@ -16,6 +16,7 @@ from stable_baselines3 import PPO
 
 from selfdrive.train import train_ppo
 from selfdrive.train.callbacks import EpisodeCsvLogger, PeriodicEval
+from selfdrive.train.policies import MeanPenaltyPolicy
 
 
 def tiny_run_config(tmp_path, total: int, **extra):
@@ -59,6 +60,19 @@ def test_squashed_gsde_settings_reach_the_model_and_survive_a_resume(tmp_path):
     model = PPO.load(tmp_path / "run" / "final_model.zip")
     assert model.num_timesteps == 256
     assert model.use_sde and model.sde_sample_freq == 4 and model.policy.squash_output
+
+
+def test_mean_penalty_policy_trains_saves_and_resumes(tmp_path):
+    config = tiny_run_config(tmp_path, 128, use_sde=True, sde_sample_freq=4, squash_output=True,
+                             log_std_init=-2.0, ent_coef=0.005, mean_penalty=0.05, mean_margin=1.5)
+    train_ppo.main(["--config", str(config), "--name", "run"])
+    checkpoint = tmp_path / "run" / "checkpoints" / "ppo_128_steps.zip"
+    train_ppo.main(["--resume", str(checkpoint), "--total-timesteps", "256"])
+
+    model = PPO.load(tmp_path / "run" / "final_model.zip")
+    assert model.num_timesteps == 256
+    assert isinstance(model.policy, MeanPenaltyPolicy)
+    assert (model.policy.mean_penalty, model.policy.mean_margin) == (0.05, 1.5)
 
 
 def test_trainer_pins_torch_threads(tmp_path):
