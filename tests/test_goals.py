@@ -438,3 +438,13 @@ def test_waypoint_pay5_config_is_the_waypoint_config_with_five_times_the_pay():
     for key in ("w_progress", "goal_bonus"):
         assert ours["reward"].pop(key) == 5.0 * base["reward"].pop(key)
     assert ours == base
+
+
+def test_waypoint_yaw25_config_is_pay5_with_the_heading_drift_range_halved():
+    base = load_yaml("configs/env_waypoint_pay5.yaml")
+    ours = load_yaml("configs/env_waypoint_pay5_yaw25.yaml")
+    assert ours["domain_rand"].pop("odom_yaw_noise") == [0.005, 0.025]
+    assert ours == base
+    assert DomainRandConfig().odom_yaw_noise == (0.005, 0.05)  # what pay5 draws
+    cfg = load_env_config("configs/env_waypoint_pay5_yaw25.yaml")
+    assert cfg.domain_rand.odom_yaw_noise == (0.005, 0.025)

@@ -16,8 +16,10 @@ Over the three seconds the memory spans, that is centimetres. It is modelled any
 because a policy trained on perfect odometry learns to trust remembered points to the
 millimetre, and that trust does not transfer.
 
-Only the memory reads this estimate. The rest of the environment uses the true pose, and
-rewards always do.
+The memory and the goal block read this estimate. The goal block measures range and bearing
+from it for a whole episode rather than three seconds, so its error grows to tens of
+centimetres, and past a metre on the worst heading-drift draws. The rest of the environment
+uses the true pose, and rewards always do.
 """
 
 from __future__ import annotations
