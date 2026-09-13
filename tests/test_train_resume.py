@@ -10,6 +10,7 @@ import csv
 import json
 
 import pytest
+import torch
 import yaml
 from stable_baselines3 import PPO
 
@@ -58,6 +59,17 @@ def test_squashed_gsde_settings_reach_the_model_and_survive_a_resume(tmp_path):
     model = PPO.load(tmp_path / "run" / "final_model.zip")
     assert model.num_timesteps == 256
     assert model.use_sde and model.sde_sample_freq == 4 and model.policy.squash_output
+
+
+def test_trainer_pins_torch_threads(tmp_path):
+    # Unpinned trainers running side by side starved each other's workers of CPU.
+    before = torch.get_num_threads()
+    try:
+        config = tiny_run_config(tmp_path, 64, torch_threads=2)
+        train_ppo.main(["--config", str(config), "--name", "run"])
+        assert torch.get_num_threads() == 2
+    finally:
+        torch.set_num_threads(before)
 
 
 def test_resume_refuses_a_checkpoint_already_past_the_budget(tmp_path):
