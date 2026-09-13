@@ -32,7 +32,7 @@ from ..sensors.odometry import Odometry, OdometryParams
 from ..sensors.ultrasonic import UltrasonicArray, UltrasonicParams
 from ..world.generators import ArenaParams, make_arena, sample_spawn
 from .braking import brake_shortfall
-from .goals import GoalConfig, GoalTracker
+from .goals import GoalConfig, GoalPatience, GoalTracker
 from .memory import EgoMemory
 from .obs import ObsConfig, ObservationBuilder
 from .randomize import DomainRandConfig
@@ -110,6 +110,10 @@ class CarEnv(gym.Env):
         # Likewise goals, which also need the odometry estimate the observation reads.
         self.goals: GoalTracker | None = (
             GoalTracker(self.cfg.goal, self.cfg.car) if o.goal_block else None)
+        if o.goal_patience and not o.goal_block:
+            raise ValueError("obs.goal_patience needs obs.goal_block")
+        self.patience: GoalPatience | None = (
+            GoalPatience(o.patience_gain) if o.goal_patience else None)
 
     # --- episode setup -------------------------------------------------------
 
@@ -184,6 +188,8 @@ class CarEnv(gym.Env):
             # A child generator of its own, spawned after odometry's for the same reason.
             self._goal_rng = self.np_random.spawn(1)[0]
             self.goals.reset(self.world, x, y, self._goal_rng, pin=options.get("goal"))
+            if self.patience is not None:
+                self.patience.reset(self._goal_range())
         self.steps = 0
         self._last_action[:] = 0.0
         self._episode = {
@@ -271,8 +277,14 @@ class CarEnv(gym.Env):
         goal = None
         if self.goals is not None:
             odo = self.odometry
-            goal = self.obs_builder.goal(*self.goals.vector(odo.x, odo.y, odo.theta))
+            waited = None if self.patience is None else self.patience.seconds
+            goal = self.obs_builder.goal(*self.goals.vector(odo.x, odo.y, odo.theta), waited)
         return frame, ring, goal
+
+    def _goal_range(self) -> float:
+        """Straight-line range to the goal from the odometry estimate, as the goal block has it."""
+        odo = self.odometry
+        return self.goals.vector(odo.x, odo.y, odo.theta)[0]
 
     def _remember(self, depth: np.ndarray, ultra: np.ndarray) -> np.ndarray:
         """Store this step's new obstacle readings and return the ring the policy sees."""
@@ -340,6 +352,10 @@ class CarEnv(gym.Env):
             odo = self.odometry
             progress, reached = self.goals.update(state.x, state.y, self._goal_rng,
                                                   estimate=(odo.x, odo.y))
+            if self.patience is not None and reached:
+                self.patience.reset(self._goal_range())
+            elif self.patience is not None:
+                self.patience.update(self._goal_range(), self.dt)
 
         reward, terms = self.reward_fn(
             x=state.x,

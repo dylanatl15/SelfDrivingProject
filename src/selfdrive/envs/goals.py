@@ -154,3 +154,34 @@ class GoalTracker:
             return math.inf, 0.0
         dx, dy = self.goal[0] - x, self.goal[1] - y
         return math.hypot(dx, dy), wrap_angle(math.atan2(dy, dx) - theta)
+
+
+class GoalPatience:
+    """Seconds since the range to the goal last fell to a new low.
+
+    waypoint_pay5 shuffled in dead ends: backing out cost range, so every step of a detour
+    looked worse than the step before, and nothing in its input changed while it dithered.
+    This clock is that missing input. It counts up while the car gets no closer, and goes
+    back to zero when the range falls `gain` metres below its best since the goal appeared,
+    or when a new goal appears.
+
+    It reads the same straight-line range from the odometry estimate as the goal block,
+    not path distance, because that range is all the phone has (`docs/goal-block.md`).
+    """
+
+    def __init__(self, gain: float):
+        self.gain = gain
+        self.best = math.inf
+        self.seconds = 0.0
+
+    def reset(self, range_m: float) -> None:
+        """A new goal: nothing has been waited for yet."""
+        self.best, self.seconds = range_m, 0.0
+
+    def update(self, range_m: float, dt: float) -> float:
+        """Advance one control period at `range_m` and return the seconds waited."""
+        if range_m <= self.best - self.gain:
+            self.best, self.seconds = range_m, 0.0
+        else:
+            self.seconds += dt
+        return self.seconds
