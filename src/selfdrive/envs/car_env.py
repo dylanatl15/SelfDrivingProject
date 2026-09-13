@@ -320,9 +320,17 @@ class CarEnv(gym.Env):
 
         collided = self.world.collides(state.x, state.y, state.theta, p.length, p.width)
         clearance = self.world.clearance(state.x, state.y, state.theta, p.length, p.width)
+        if self.odometry is not None:
+            lost = self.odometry.update(state.x, state.y, state.theta, self.dt, self._odometry_rng)
+            if lost and self.memory is not None:
+                self.memory.clear()  # tracking lost: nothing stored relates to the new pose
         progress, reached = 0.0, False
         if self.goals is not None:
-            progress, reached = self.goals.update(state.x, state.y, self._goal_rng)
+            # Odometry has taken this step already, so an arrival judged from it uses the
+            # estimate the phone would hold now.
+            odo = self.odometry
+            progress, reached = self.goals.update(state.x, state.y, self._goal_rng,
+                                                  estimate=(odo.x, odo.y))
 
         reward, terms = self.reward_fn(
             x=state.x,
@@ -352,10 +360,6 @@ class CarEnv(gym.Env):
         self._episode["lock_steps"] += float(abs(action[STEER]) > 0.8 and action[THROTTLE] > 0)
         self._episode["collided"] = float(collided)
 
-        if self.odometry is not None:
-            lost = self.odometry.update(state.x, state.y, state.theta, self.dt, self._odometry_rng)
-            if lost and self.memory is not None:
-                self.memory.clear()  # tracking lost: nothing stored relates to the new pose
         obs = self.obs_builder.push(*self._frame())
         terminated = bool(collided)
         truncated = bool(self.steps >= self.cfg.max_steps or self.reward_fn.is_stalled)

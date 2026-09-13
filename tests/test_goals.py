@@ -19,6 +19,7 @@ from selfdrive.envs.obs import ObsConfig, ObservationBuilder
 from selfdrive.envs.randomize import DomainRandConfig
 from selfdrive.envs.rewards import RewardConfig
 from selfdrive.eval.evaluate import ConstantPolicy, EvalResult, run_episodes
+from selfdrive.sensors.odometry import OdometryParams
 from selfdrive.world.generators import ArenaParams
 from selfdrive.world.geometry import World, point_seg_distance
 from selfdrive.world.navigation import AXIS, DIAG, NavGrid, PathField
@@ -36,9 +37,10 @@ FIELD = box(30.0)
 POCKET = [(1.0, 1.0, 5.0, 1.0), (5.0, 1.0, 5.0, 5.0), (5.0, 5.0, 1.0, 5.0), (1.0, 5.0, 1.0, 1.0)]
 
 
-def goal_env(max_steps: int = 600, memory: int = 0) -> CarEnv:
+def goal_env(max_steps: int = 600, memory: int = 0, goal: GoalConfig | None = None) -> CarEnv:
     cfg = EnvConfig(
         obs=ObsConfig(goal_block=True, memory_sectors=memory),
+        goal=goal or GoalConfig(),
         reward=RewardConfig(w_explore=0.0, w_progress=1.0, goal_bonus=5.0),
         arena=ArenaParams(kind="outdoor"),
         domain_rand=DomainRandConfig(enabled=False),
@@ -329,6 +331,43 @@ def test_arriving_pays_the_bonus_once_and_draws_the_next_goal_further_on():
     assert math.dist(e.goals.goal, (13.0, 15.0)) >= 1.5  # at least 2 m of path away
 
 
+def test_by_default_arrival_is_judged_from_the_true_pose_whatever_the_estimate():
+    rng = np.random.default_rng(0)
+    t = GoalTracker()
+    t.reset(FIELD, 10.0, 15.0, rng, pin=(13.0, 15.0))
+    assert not t.update(11.0, 15.0, rng, estimate=(13.0, 15.0))[1]
+    assert t.update(12.8, 15.0, rng, estimate=(0.0, 0.0))[1]
+
+
+def test_arrival_from_odometry_is_judged_where_the_estimate_puts_the_car():
+    rng = np.random.default_rng(0)
+    t = GoalTracker(GoalConfig(arrival_from_odometry=True))
+    t.reset(FIELD, 10.0, 15.0, rng, pin=(13.0, 15.0))
+    progress, arrived = t.update(12.8, 15.0, rng, estimate=(11.0, 15.0))
+    assert progress > 2.0 and not arrived  # truly there, but 2 m short by the estimate
+    _, arrived = t.update(11.2, 15.0, rng, estimate=(12.7, 15.0))
+    assert arrived and t.reached == 1
+    assert math.dist(t.goal, (11.2, 15.0)) >= 1.5  # drawn from the car, not the old goal
+    with pytest.raises(ValueError, match="estimate"):
+        t.update(11.2, 15.0, rng)
+
+
+def test_the_env_judges_arrival_from_the_estimate_its_goal_block_reads():
+    e = goal_env(goal=GoalConfig(arrival_from_odometry=True))
+    e.reset(seed=0, options={"world": FIELD, "pose": (10.0, 15.0, 0.0), "goal": (13.0, 15.0)})
+    e.odometry.p = OdometryParams(pos_noise=0.0, yaw_noise=0.0)
+    e.odometry.x += 1.0  # the estimate has drifted a metre ahead of the car
+    for _ in range(150):
+        _, _, terminated, truncated, info = e.step(np.array([0.0, 0.6], np.float32))
+        if info.get("goal_reached"):
+            break
+        assert not (terminated or truncated)
+    else:
+        pytest.fail("never reached a goal the estimate put 2 m ahead")
+    assert 13.0 - e.car.state.x > 1.0  # the car itself is still over a metre short
+    assert 13.0 - e.odometry.x <= 0.5
+
+
 def test_goals_change_nothing_else_about_an_episode():
     def trace(goal_block: bool) -> np.ndarray:
         e = CarEnv(EnvConfig(obs=ObsConfig(memory_sectors=24, goal_block=goal_block),
@@ -448,3 +487,10 @@ def test_waypoint_yaw25_config_is_pay5_with_the_heading_drift_range_halved():
     assert DomainRandConfig().odom_yaw_noise == (0.005, 0.05)  # what pay5 draws
     cfg = load_env_config("configs/env_waypoint_pay5_yaw25.yaml")
     assert cfg.domain_rand.odom_yaw_noise == (0.005, 0.025)
+
+
+def test_waypoint_pin_config_is_pay5_with_arrival_judged_from_odometry():
+    base = load_yaml("configs/env_waypoint_pay5.yaml")
+    ours = load_yaml("configs/env_waypoint_pay5_pin.yaml")
+    assert ours["goal"].pop("arrival_from_odometry") is True
+    assert ours == base
