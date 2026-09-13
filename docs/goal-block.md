@@ -65,9 +65,11 @@ should stop the car instead.
 
 ## Arrival and what goals to give it
 
-- **Arrival.** Training counts a goal as reached when the car's centre is within **0.5 m**
-  of it. At that point the next goal appears. Advance to the next waypoint, or stop, at
-  the same distance.
+- **Arrival.** Advance to the next waypoint, or stop, when the range you compute is at most
+  **0.5 m**. The app can only judge arrival from its own pose. Models trained with
+  `goal.arrival_from_odometry: true` were trained on exactly that rule. Earlier models were
+  trained to count arrival within 0.5 m of the true goal, which the app cannot know, and on
+  a drifted pose they learned to hunt around the spot the app calls arrived.
 - **Goal placement.** Training goals are always at least 0.5 m from any obstacle, and
   always somewhere the car body can drive to, forward and reversing, within its turning
   radius. Gaps from 0.3 m count when the car can line up with them. A goal the app places

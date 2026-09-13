@@ -8,7 +8,8 @@ than open floor anywhere else.
 
 Two sides of that split, as everywhere else in the environment:
 
-*   Progress, arrival and the goals themselves use the true pose and the true floor.
+*   Progress and the goals themselves use the true pose and the true floor. So does
+    arrival, unless `arrival_from_odometry` judges it where the phone would; see `update`.
 *   The policy sees range and bearing to the goal from the drifting odometry estimate,
     which is what the phone will have: a pin in ARCore's frame and ARCore's own pose.
 """
@@ -37,6 +38,8 @@ class GoalConfig:
     # for any of them. The defaults draw a 0.25 m x 1.1 wheelbase at 22 degrees: 0.68 m.
     turn_radius: float = 0.70
     headings: int = 16  # heading steps in the pose lattice
+    # Judge arrival from the odometry estimate, as the phone must, rather than the true pose.
+    arrival_from_odometry: bool = False
 
 
 class GoalTracker:
@@ -107,12 +110,21 @@ class GoalTracker:
         self.field = self.grid.field_from(*goal)
         self.remaining = self.grid.distance(self.field, x, y)
 
-    def update(self, x: float, y: float, rng: np.random.Generator) -> tuple[float, bool]:
+    def update(self, x: float, y: float, rng: np.random.Generator,
+               estimate: tuple[float, float] | None = None) -> tuple[float, bool]:
         """Path metres closed since the last update, and whether the goal was reached.
 
         On arrival the next goal is drawn from the old goal's field. The car is within
         `radius` of the old goal, so that field measures distance from the car too, and a
         new goal costs one field rather than two.
+
+        With `arrival_from_odometry`, arrival is judged from `estimate`, the odometry
+        position. That is still ground truth, not a sensor reading. The phone holds the goal
+        as a pin in its own drifting frame, and the true distance from the car to where that
+        pin now sits in the world equals the estimate's distance to the goal, because the
+        drift is a rigid transform. Progress still pays path distance to the goal itself.
+        The car can then arrive away from the old goal, so the next goal is drawn from a
+        field built at the car.
         """
         if self.goal is None:
             return 0.0, False
@@ -124,10 +136,16 @@ class GoalTracker:
             self.remaining = now  # scraping a wall reads NaN; keep the last good distance
         self.progress_m += progress
 
-        arrived = math.hypot(x - self.goal[0], y - self.goal[1]) <= self.c.radius
+        ax, ay = x, y
+        if self.c.arrival_from_odometry:
+            if estimate is None:
+                raise ValueError("arrival_from_odometry needs the odometry estimate")
+            ax, ay = estimate
+        arrived = math.hypot(ax - self.goal[0], ay - self.goal[1]) <= self.c.radius
         if arrived:
             self.reached += 1
-            self._set_goal(self._draw(self.field, rng), x, y)
+            field = self.grid.field_from(x, y) if self.c.arrival_from_odometry else self.field
+            self._set_goal(self._draw(field, rng), x, y)
         return progress, arrived
 
     def vector(self, x: float, y: float, theta: float) -> tuple[float, float]:

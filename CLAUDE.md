@@ -100,6 +100,14 @@ fit round. The observation gains three floats
 (`docs/goal-block.md`, a change the Android app must mirror), and best models are kept by
 `clean_goals`.
 
+`goal.arrival_from_odometry` (`env_waypoint_pay5_pin.yaml`) judges goal arrival from the
+odometry estimate. That is not the reward reading a sensor. The goal is a pin in the phone's
+drifting frame, and the true distance from the car to where that pin now sits is exactly the
+estimate's distance to the goal, since drift moves the frame rigidly. Progress still pays true
+path distance to the goal. Without it, arrival waits for the true goal: in pay5's drift probe
+the goal the policy saw sat a median 0.37 m from the real one, and beyond the 0.5 m arrival
+radius on 30 % of steps.
+
 ## Throughput ceiling - do not chase it
 
 `python -m selfdrive.train.bench` reports ~900 steps/s single-process and ~4,800 across
