@@ -87,6 +87,15 @@ noise. `train_ppo_v7.yaml` sets `mean_penalty`, a quadratic charge on pre-tanh m
 1.5 (`train/policies.py`). It rides in the entropy term, so `train/entropy_loss` includes it;
 `train/mean_penalty` and `train/pre_tanh_mean_abs` log it alone.
 
+`configs/env_waypoint.yaml` drives to chained goals instead of exploring (`envs/goals.py`).
+Its reward pays for path distance closed, measured on a 0.2 m occupancy raster by
+`world/navigation.py`. It never pays for straight-line distance, which would reward pressing
+against the wall between the car and its goal; `tests/test_goals.py` pins the U-trap case.
+Goals are only drawn from floor the car can reach, and with goals on, the car never spawns in
+a pocket that random walls sealed off. The observation gains three floats
+(`docs/goal-block.md`, a change the Android app must mirror), and best models are kept by
+`clean_goals`.
+
 ## Throughput ceiling - do not chase it
 
 `python -m selfdrive.train.bench` reports ~900 steps/s single-process and ~4,800 across

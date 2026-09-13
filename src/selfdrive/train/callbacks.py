@@ -73,7 +73,7 @@ class EpisodeCsvLogger(BaseCallback):
     FIELDS = [
         "timesteps", "wall_s", "distance_m", "coverage_m2", "mean_speed_mps", "min_clearance_m",
         "stall_frac", "reverse_frac", "backing_frac", "lock_frac", "retrace_frac", "collided",
-        "stuck", "steps",
+        "stuck", "steps", "goals_reached", "goal_progress_m",
     ]
 
     def __init__(self, path: str | Path, start_timesteps: int = 0, verbose: int = 0):
@@ -132,7 +132,8 @@ class PeriodicEval(BaseCallback):
 
     The best model is the one with the most `clean_coverage_m2`: floor covered in episodes
     that neither crashed nor got stuck. Keeping it by success rate crowned `phase1_v2` at
-    11M steps, which circled open patches and so never failed.
+    11M steps, which circled open patches and so never failed. With goals, it is the one
+    with the most `clean_goals` instead (`EvalResult.score`).
     """
 
     EVAL_SEED_BASE = 1_000_000
@@ -177,10 +178,10 @@ class PeriodicEval(BaseCallback):
             PPO.load(best, device="cpu"), self._get_env(render=False), self.n_episodes,
             seed=self.EVAL_SEED_BASE, deterministic=True,
         )
-        self._best = result.clean_coverage_m2
+        self._best = result.score
         if self.verbose:
-            print(f"[eval] resuming; the saved best model covers "
-                  f"{result.clean_coverage_m2:.1f} m2 clean")
+            print(f"[eval] resuming; the saved best model scores {result.score:.2f} "
+                  f"({'clean goals' if result.has_goals else 'clean m2'})")
 
     def _get_env(self, render: bool):
         # One env for scoring, rebuilt when pixels are needed. Never a training worker.
@@ -205,10 +206,10 @@ class PeriodicEval(BaseCallback):
         if self.verbose:
             print(f"[eval @ {self.num_timesteps:>10,}] {result}")
 
-        # Clean coverage, not success rate (see the class docstring) and not return,
-        # which is normalized and drifts with VecNormalize.
-        if self.best_model_path and result.clean_coverage_m2 > self._best:
-            self._best = result.clean_coverage_m2
+        # Clean coverage or clean goals, not success rate (see the class docstring) and
+        # not return, which is normalized and drifts with VecNormalize.
+        if self.best_model_path and result.score > self._best:
+            self._best = result.score
             self.best_model_path.parent.mkdir(parents=True, exist_ok=True)
             self.model.save(self.best_model_path)
 

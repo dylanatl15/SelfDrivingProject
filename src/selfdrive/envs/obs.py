@@ -16,8 +16,6 @@ Per frame (17 floats, all in [-1, 1]):
     [15]      last throttle command
     [16]      last steering command
 
-    Phase 2 appends a two-float goal block (range, bearing to the GPS pin) here.
-
 With `memory_sectors` S > 0, one obstacle-memory block of 2S floats follows the stacked
 frames. It is not stacked itself, since it already spans `memory_seconds`:
 
@@ -25,6 +23,16 @@ frames. It is not stacked itself, since it already spans `memory_seconds`:
     [S : 2S]  age of that obstacle
 
 Layout and rules are in `envs/memory.py`. S defaults to 0, which keeps the 68-float input.
+
+With `goal_block` on, three floats follow everything else. They are not stacked either:
+
+    [0]       straight-line range to the goal, over `norm_goal_max`
+    [1]       sine of the bearing to the goal, left-positive like steering
+    [2]       cosine of that bearing
+
+The bearing is split into sine and cosine because a single angle jumps from +pi to -pi as
+the goal passes behind the car. Both come from the pose estimate, not the true pose; the
+phone's rules are in `docs/goal-block.md`.
 
 Two rules that exist for deployment rather than for training:
 
@@ -64,13 +72,21 @@ class ObsConfig:
     memory_seconds: float = 3.0
     norm_memory_max: float = 5.00  # metres
 
+    # Range and bearing to the current goal, appended last. Same published interface.
+    goal_block: bool = False
+    norm_goal_max: float = 15.00  # metres
+
     @property
     def per_frame(self) -> int:
         return self.n_depth + 1 + self.n_ultrasonic + 4
 
     @property
+    def goal_size(self) -> int:
+        return 3 if self.goal_block else 0
+
+    @property
     def size(self) -> int:
-        return self.per_frame * self.frame_stack + 2 * self.memory_sectors
+        return self.per_frame * self.frame_stack + 2 * self.memory_sectors + self.goal_size
 
 
 def _unit_to_pm1(values: np.ndarray, scale: float) -> np.ndarray:
@@ -85,6 +101,7 @@ class ObservationBuilder:
         self.c = config or ObsConfig()
         self._stack: deque[np.ndarray] = deque(maxlen=self.c.frame_stack)
         self._ring: np.ndarray | None = None
+        self._goal: np.ndarray | None = None
 
     @property
     def size(self) -> int:
@@ -123,7 +140,14 @@ class ObservationBuilder:
         out[i + 3] = np.clip(last_steer, -1.0, 1.0)
         return out
 
-    def reset(self, first_frame: np.ndarray, ring: np.ndarray | None = None) -> np.ndarray:
+    def goal(self, range_m: float, bearing: float) -> np.ndarray:
+        """The goal block for a range in metres and a left-positive bearing in radians.
+        An infinite range (no goal) reads as the far end of the scale, dead ahead."""
+        return np.array([_unit_to_pm1(np.asarray(range_m, dtype=float), self.c.norm_goal_max),
+                         np.sin(bearing), np.cos(bearing)], dtype=np.float32)
+
+    def reset(self, first_frame: np.ndarray, ring: np.ndarray | None = None,
+              goal: np.ndarray | None = None) -> np.ndarray:
         """Prime the stack by repeating the first frame.
 
         Zero-filling would present a fabricated history - an apparent jump from
@@ -134,12 +158,21 @@ class ObservationBuilder:
         for _ in range(self.c.frame_stack):
             self._stack.append(first_frame.copy())
         self._set_ring(ring)
+        self._set_goal(goal)
         return self.stacked()
 
-    def push(self, frame: np.ndarray, ring: np.ndarray | None = None) -> np.ndarray:
+    def push(self, frame: np.ndarray, ring: np.ndarray | None = None,
+             goal: np.ndarray | None = None) -> np.ndarray:
         self._stack.append(frame.copy())
         self._set_ring(ring)
+        self._set_goal(goal)
         return self.stacked()
+
+    def _set_goal(self, goal: np.ndarray | None) -> None:
+        if (0 if goal is None else len(goal)) != self.c.goal_size:
+            raise ValueError(f"goal block must have {self.c.goal_size} floats, got "
+                             f"{None if goal is None else len(goal)}")
+        self._goal = None if goal is None else np.asarray(goal, dtype=np.float32)
 
     def _set_ring(self, ring: np.ndarray | None) -> None:
         expected = 2 * self.c.memory_sectors
@@ -149,10 +182,12 @@ class ObservationBuilder:
         self._ring = None if ring is None else np.asarray(ring, dtype=np.float32)
 
     def stacked(self) -> np.ndarray:
-        """Oldest frame first, newest last, then the memory ring if there is one."""
+        """Oldest frame first, newest last, then the memory ring and the goal block."""
         parts = list(self._stack)
         if self._ring is not None:
             parts.append(self._ring)
+        if self._goal is not None:
+            parts.append(self._goal)
         return np.concatenate(parts).astype(np.float32)
 
     def latest_ring(self) -> np.ndarray | None:

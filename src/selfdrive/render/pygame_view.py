@@ -9,14 +9,18 @@ actually receives. Watching the two diverge is the fastest way to confirm that d
 latency and staleness are behaving, and those are the parts of the model most likely to
 be silently wrong.
 
-Under everything sits the ground the explore reward has already paid for, bright where the
-car has just been and dimmer with age. A car that orbits shows up at once as a ring that
-stops growing. Press C to toggle it.
+Under everything sits the ground the car has covered, coloured by how fast it last went
+through: green at full speed, yellow at half, red stopped. It dims with age, and a car that
+orbits shows up at once as a ring that stops growing. Press C to toggle it.
 
 With the obstacle memory on, remembered points are drawn as violet dots, placed where the
 car *believes* they are: relative to the drifting odometry pose, then drawn around the
 true car. Drift shows as dots peeling away from the walls they came from. Hollow circles
 mark the nearest point per sector as the policy received it. Press M to toggle.
+
+With goals on, the true goal is a gold ring the size of the arrival radius. A cross marks
+where the car believes the goal is: the range and bearing it observed, laid out from the
+true pose. The gap between the two is odometry drift.
 """
 
 from __future__ import annotations
@@ -37,12 +41,26 @@ RAY_SEEN = (120, 220, 150)
 ULTRA = (235, 110, 130)
 TEXT = (210, 216, 226)
 WARN = (250, 200, 90)
-PAINT_NEW = (64, 168, 128)
-PAINT_OLD = (36, 66, 60)
-PAINT_FADE_S = 8.0  # seconds for covered ground to fade from PAINT_NEW to PAINT_OLD
+PAINT_STOPPED = (214, 58, 52)
+PAINT_HALF = (226, 196, 64)  # half the car's top forward speed
+PAINT_FULL = (64, 186, 104)
+PAINT_UNTIMED = (70, 84, 92)  # covered before this view started watching the episode
+PAINT_FADE_S = 8.0  # seconds for covered ground to dim to PAINT_DIM of its brightness
+PAINT_DIM = 0.6
 MEMORY_NEW = (196, 150, 255)
 MEMORY_OLD = (82, 64, 118)
 MEMORY_NEAR = (236, 222, 255)
+GOAL = (255, 214, 92)
+GOAL_SEEN = (255, 240, 180)
+
+
+def _speed_colour(frac: np.ndarray) -> np.ndarray:
+    """Red at a standstill, yellow at half speed, green at full; grey where no speed was seen."""
+    f = np.clip(np.nan_to_num(frac, nan=0.0), 0.0, 1.0)[..., None]
+    stopped, half, full = (np.array(c, np.float32) for c in (PAINT_STOPPED, PAINT_HALF, PAINT_FULL))
+    rgb = (stopped + (half - stopped) * np.minimum(2.0 * f, 1.0)
+           + (full - half) * np.maximum(2.0 * f - 1.0, 0.0))
+    return np.where(np.isnan(frac)[..., None], np.array(PAINT_UNTIMED, np.float32), rgb)
 
 
 class PygameView:
@@ -66,6 +84,11 @@ class PygameView:
         self.font = pygame.font.SysFont("monospace", 14)
         self.show_coverage = True
         self.show_memory = True
+        # Speed each coverage pixel was last driven at. Kept here, not in the reward, which
+        # runs in every training worker; cleared whenever a new episode starts.
+        self._speed: np.ndarray | None = None
+        self._speed_key: tuple | None = None
+        self._speed_step = 0
 
     # --- world <-> screen ----------------------------------------------------
 
@@ -117,6 +140,7 @@ class PygameView:
             centre = self._to_screen(np.array([[cx, cy]]), t)[0]
             pg.draw.circle(self.screen, CONE, centre, max(int(r * scale), 2))
 
+        self._draw_goal(env, t)
         if self.show_memory:
             self._draw_memory(env, t)
         self._draw_depth(env, t)
@@ -148,6 +172,7 @@ class PygameView:
             # view for its eval videos. Draw without the layer rather than crash the run.
             return
         age, (ox, oy), res = raster()
+        self._stamp_speed(env, age.shape, (ox, oy), res)
         covered = age < env.reward_fn.c.revisit_s
         cols = np.flatnonzero(covered.any(axis=1))
         rows = np.flatnonzero(covered.any(axis=0))
@@ -157,9 +182,9 @@ class PygameView:
         # Only the bounding box of covered ground, so the cost tracks what has been driven.
         x0, x1, y0, y1 = cols[0], cols[-1] + 1, rows[0], rows[-1] + 1
         age, covered = age[x0:x1, y0:y1], covered[x0:x1, y0:y1]
+        rgb = _speed_colour(self._speed[x0:x1, y0:y1] / max(env.car.p.max_speed_fwd, 1e-6))
         fade = np.clip(age / PAINT_FADE_S, 0.0, 1.0)[..., None]
-        new, old = np.array(PAINT_NEW, np.float32), np.array(PAINT_OLD, np.float32)
-        rgb = (1.0 - fade) * new + fade * old
+        rgb *= 1.0 - (1.0 - PAINT_DIM) * fade
         rgb = np.where(covered[..., None], rgb, np.array(BG, np.float32)).astype(np.uint8)
 
         pg = self.pygame
@@ -171,6 +196,41 @@ class PygameView:
         # crop is half a pixel left of its first column and above its last row.
         corner = np.array([[ox + (x0 - 0.5) * res, oy + (y0 + h - 0.5) * res]])
         self.screen.blit(pg.transform.scale(surf, size), self._to_screen(corner, t)[0])
+
+    def _stamp_speed(self, env, shape, origin, res) -> None:
+        """Record the car's current speed under a disk the size of the reward's swath."""
+        key = (shape, origin)
+        if self._speed is None or key != self._speed_key or env.steps < self._speed_step:
+            self._speed = np.full(shape, np.nan, dtype=np.float32)
+            self._speed_key = key
+        self._speed_step = env.steps
+        s = env.car.state
+        r = env.reward_fn.c.explore_radius / res
+        n = math.ceil(r)
+        px, py = round((s.x - origin[0]) / res), round((s.y - origin[1]) / res)
+        i0, i1 = max(px - n, 0), min(px + n + 1, shape[0])
+        j0, j1 = max(py - n, 0), min(py + n + 1, shape[1])
+        if i0 >= i1 or j0 >= j1:
+            return
+        gx, gy = np.meshgrid(np.arange(i0, i1) - px, np.arange(j0, j1) - py, indexing="ij")
+        self._speed[i0:i1, j0:j1][gx**2 + gy**2 <= r * r] = abs(s.speed)
+
+    def _draw_goal(self, env, t):
+        goals = getattr(env, "goals", None)
+        if goals is None or goals.goal is None:
+            return
+        pg = self.pygame
+        centre = self._to_screen(np.array([goals.goal]), t)[0]
+        pg.draw.circle(self.screen, GOAL, centre, max(int(goals.c.radius * t[0]), 4), 2)
+        pg.draw.circle(self.screen, GOAL, centre, 3)
+
+        s, odo = env.car.state, env.odometry
+        dist, bearing = goals.vector(odo.x, odo.y, odo.theta)
+        ang = s.theta + bearing
+        sx, sy = self._to_screen(
+            np.array([[s.x + dist * math.cos(ang), s.y + dist * math.sin(ang)]]), t)[0]
+        pg.draw.line(self.screen, GOAL_SEEN, (sx - 6, sy - 6), (sx + 6, sy + 6), 2)
+        pg.draw.line(self.screen, GOAL_SEEN, (sx - 6, sy + 6), (sx + 6, sy - 6), 2)
 
     def _draw_memory(self, env, t):
         memory = getattr(env, "memory", None)
@@ -257,11 +317,16 @@ class PygameView:
             f"coverage {env.reward_fn.coverage_m2:5.1f} m2",
         ]
         odo = getattr(env, "odometry", None)
-        if getattr(env, "memory", None) is not None and odo is not None:
-            n = len(env.memory.live(env.steps * env.dt)[1])
-            drift = math.hypot(odo.x - s.x, odo.y - s.y)
-            lines.append(f"memory {n:4d} pts   odom drift {drift:4.2f} m"
-                         + ("" if odo.tracking else "   TRACKING LOST"))
+        if odo is not None:
+            parts = []
+            if getattr(env, "memory", None) is not None:
+                parts.append(f"memory {len(env.memory.live(env.steps * env.dt)[1]):4d} pts")
+            parts.append(f"odom drift {math.hypot(odo.x - s.x, odo.y - s.y):4.2f} m")
+            lines.append("   ".join(parts) + ("" if odo.tracking else "   TRACKING LOST"))
+        goals = getattr(env, "goals", None)
+        if goals is not None:
+            lines.append(f"goals {goals.reached:2d}   to goal {goals.remaining:5.1f} m path   "
+                         f"progress {goals.progress_m:+6.1f} m")
         for i, text in enumerate(lines):
             warn = ("stalled" in text and env.reward_fn.stalled_steps > 0) or "LOST" in text
             colour = WARN if warn else TEXT
