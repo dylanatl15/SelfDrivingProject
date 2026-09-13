@@ -47,6 +47,22 @@ class RewardTermLogger(BaseCallback):
         return True
 
 
+class MeanPenaltyLogger(BaseCallback):
+    """The pre-tanh mean penalty on its own, since `train/entropy_loss` has it mixed in.
+
+    Values are from the last minibatch of the last update; see train/policies.py.
+    """
+
+    def _on_step(self) -> bool:
+        return True
+
+    def _on_rollout_end(self) -> None:
+        policy = self.model.policy
+        if getattr(policy, "mean_penalty", 0.0) > 0 and self.model._n_updates > 0:
+            self.logger.record("train/mean_penalty", policy.last_mean_penalty)
+            self.logger.record("train/pre_tanh_mean_abs", policy.last_mean_abs)
+
+
 class EpisodeCsvLogger(BaseCallback):
     """Append per-episode metrics to CSV.
 

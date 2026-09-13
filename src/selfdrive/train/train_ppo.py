@@ -28,7 +28,8 @@ from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback
 from stable_baselines3.common.vec_env import VecNormalize
 
 from ..config import describe, load_env_config, load_yaml
-from .callbacks import EpisodeCsvLogger, PeriodicEval, RewardTermLogger
+from .callbacks import EpisodeCsvLogger, MeanPenaltyLogger, PeriodicEval, RewardTermLogger
+from .policies import MeanPenaltyPolicy
 from .vec import make_vec_env
 
 DEFAULTS: dict = {
@@ -59,6 +60,10 @@ DEFAULTS: dict = {
     "sde_sample_freq": -1,
     "squash_output": False,
     "log_std_init": 0.0,
+    # Squashed means past `mean_margin` stop exploration from trying other actions; see
+    # train/policies.py. 0 keeps the stock MlpPolicy.
+    "mean_penalty": 0.0,
+    "mean_margin": 1.5,
     "normalize_reward": True,
     "eval_every_steps": 500_000,
     "eval_episodes": 20,
@@ -124,6 +129,9 @@ def start_run(args: argparse.Namespace):
           f"({env_cfg.obs.per_frame} per frame x {env_cfg.obs.frame_stack})")
     squashed = " squashed" if cfg["squash_output"] else ""
     print(f"actions      {f'gSDE{squashed}' if cfg['use_sde'] else 'Gaussian, clipped by the env'}")
+    if cfg["mean_penalty"] > 0:
+        print(f"mean penalty {cfg['mean_penalty']} per unit^2 of pre-tanh mean past "
+              f"{cfg['mean_margin']}")
     print(f"budget       {cfg['total_timesteps']:,} steps")
 
     venv = make_vec_env(
@@ -131,14 +139,21 @@ def start_run(args: argparse.Namespace):
         normalize_reward=cfg["normalize_reward"],
     )
 
+    policy = cfg["policy"]
+    policy_kwargs = {
+        "net_arch": list(cfg["net_arch"]),
+        "squash_output": cfg["squash_output"],
+        "log_std_init": cfg["log_std_init"],
+    }
+    if cfg["mean_penalty"] > 0:
+        policy = MeanPenaltyPolicy
+        policy_kwargs.update(mean_penalty=cfg["mean_penalty"], mean_margin=cfg["mean_margin"],
+                             ent_coef=cfg["ent_coef"])
+
     model = PPO(
-        cfg["policy"],
+        policy,
         venv,
-        policy_kwargs={
-            "net_arch": list(cfg["net_arch"]),
-            "squash_output": cfg["squash_output"],
-            "log_std_init": cfg["log_std_init"],
-        },
+        policy_kwargs=policy_kwargs,
         use_sde=cfg["use_sde"],
         sde_sample_freq=cfg["sde_sample_freq"],
         n_steps=cfg["n_steps"],
@@ -210,6 +225,7 @@ def main(argv=None) -> None:
 
     callbacks = CallbackList([
         RewardTermLogger(log_freq=2000),
+        MeanPenaltyLogger(),
         EpisodeCsvLogger(run_dir / "episodes.csv", start_timesteps=start),
         PeriodicEval(
             config_path=cfg["env_config"],
