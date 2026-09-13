@@ -52,6 +52,12 @@ either found here or reliably finds elsewhere.
     cheaper than the alternative: reversing costs `w_reverse` per step, staying wedged
     costs `w_stall`, twenty-five times as much.
 
+*   With a goal (`obs.goal_block`), the drive signal can be **progress** instead:
+    `w_progress` per metre of path distance closed toward the goal, plus `goal_bonus` on
+    arrival. Path distance goes around walls (`world/navigation.py`), so no dead end facing
+    the goal pays anything to sit in, and it is a fixed function of position, so no loop
+    pays. The exploration terms stay computed for the coverage metric; set `w_explore` 0.
+
 This runs once per env step in every training worker, so it sticks to scalar math and a
 handful of numpy calls on flat arrays. Small-array `np.clip` and 2-D fancy indexing made
 an earlier draft cost 83 us a step.
@@ -75,6 +81,8 @@ RECENT_STAMPS = 4  # 3 still charged 4 % of a diagonal line on new ground; 4 cha
 class RewardConfig:
     w_explore: float = 1.0  # per metre of fresh ground
     w_retrace: float = 0.0  # per metre of ground covered again within revisit_s; 0 = off
+    w_progress: float = 0.0  # per metre of path distance closed toward the goal
+    goal_bonus: float = 0.0  # per goal reached
     w_reverse: float = 0.02  # per step at full reverse
     w_oscillation: float = 0.05  # per unit change in the steering command
     w_throttle_oscillation: float = 0.0  # per unit change in the throttle command; 0 = off
@@ -97,6 +105,8 @@ class RewardConfig:
 class RewardTerms:
     explore: float = 0.0
     retrace: float = 0.0
+    progress: float = 0.0
+    goal: float = 0.0
     reverse: float = 0.0
     oscillation: float = 0.0
     lateral: float = 0.0
@@ -109,6 +119,8 @@ class RewardTerms:
         return (
             self.explore
             + self.retrace
+            + self.progress
+            + self.goal
             + self.reverse
             + self.oscillation
             + self.lateral
@@ -259,7 +271,11 @@ class RewardFunction:
         clearance: float,
         collided: bool,
         dt: float,
+        progress_m: float = 0.0,
+        reached: bool = False,
     ) -> tuple[float, RewardTerms]:
+        """`progress_m` and `reached` come from the environment's goal tracker, which owns
+        the path-distance field; both stay 0 without a goal."""
         c = self.c
         x, y, theta = float(x), float(y), float(theta)
         x_prev, y_prev = self._history[-1]
@@ -273,6 +289,8 @@ class RewardFunction:
         self._retraced_px += retraced
         t.explore = c.w_explore * fresh * self._metres_per_pixel
         t.retrace = -c.w_retrace * retraced * self._metres_per_pixel
+        t.progress = c.w_progress * float(progress_m)
+        t.goal = c.goal_bonus * float(reached)
 
         # Reversing is allowed and sometimes necessary, but it is never free.
         t.reverse = -c.w_reverse * max(0.0, -float(throttle_cmd))

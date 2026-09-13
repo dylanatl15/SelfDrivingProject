@@ -7,6 +7,10 @@ into walls never gets stuck. `success_rate` counts only episodes that did neithe
 Neither failure catches a policy that circles an open patch for the whole episode, which
 never crashes and never sticks: `phase1_v2` scored 90 % that way at 11M steps.
 `clean_coverage_m2` does, because it counts only floor covered in episodes that did not fail.
+
+With a goal to drive to, `clean_goals` plays that part: goals reached, counting failed
+episodes as zero. A car that circles reaches nothing, and one that races goals into a wall
+keeps nothing.
 """
 
 from __future__ import annotations
@@ -49,6 +53,9 @@ class EvalResult:
     mean_distance_m: float = 0.0
     mean_coverage_m2: float = 0.0  # path length can be inflated by circling; this cannot
     clean_coverage_m2: float = 0.0  # the same, counting crashed and stuck episodes as zero
+    mean_goals: float = 0.0  # goals reached per episode, when the env has goals
+    clean_goals: float = 0.0  # the same, counting crashed and stuck episodes as zero
+    has_goals: bool = False
     mean_speed_mps: float = 0.0
     mean_min_clearance_m: float = 0.0
     mean_reverse_frac: float = 0.0  # steps commanding negative throttle, mostly braking
@@ -56,6 +63,12 @@ class EvalResult:
     mean_retrace_frac: float = 0.0  # share of the swath driven over ground already covered
     mean_lock_frac: float = 0.0  # share of steps driving forward at near-full steering lock
     mean_steps: float = 0.0
+
+    @property
+    def score(self) -> float:
+        """What the trainer keeps its best model by: clean goals when there are goals to
+        reach, clean coverage when there are not."""
+        return self.clean_goals if self.has_goals else self.clean_coverage_m2
 
     def as_dict(self) -> dict[str, float]:
         return asdict(self)
@@ -69,6 +82,8 @@ class EvalResult:
             f"reverse {self.mean_reverse_frac:5.1%}  backing {self.mean_backing_frac:5.1%}  "
             f"retrace {self.mean_retrace_frac:5.1%}  "
             f"lock {self.mean_lock_frac:5.1%}"
+            + (f"  goals {self.mean_goals:5.2f}  clean goals {self.clean_goals:5.2f}"
+               if self.has_goals else "")
         )
 
 
@@ -117,6 +132,7 @@ def run_episodes(
     stuck = np.array([r.get("stuck", 0.0) for r in rows])
     clean = (collided == 0.0) & (stuck == 0.0)
     coverage = np.array([r.get("coverage_m2", 0.0) for r in rows])
+    goals = np.array([r.get("goals_reached", 0.0) for r in rows])
 
     return EvalResult(
         episodes=len(rows),
@@ -127,6 +143,9 @@ def run_episodes(
         mean_distance_m=mean("distance_m"),
         mean_coverage_m2=mean("coverage_m2"),
         clean_coverage_m2=float(np.mean(np.where(clean, coverage, 0.0))),
+        mean_goals=float(np.mean(goals)),
+        clean_goals=float(np.mean(np.where(clean, goals, 0.0))),
+        has_goals=any("goals_reached" in r for r in rows),
         mean_speed_mps=mean("mean_speed_mps"),
         mean_min_clearance_m=mean("min_clearance_m"),
         mean_reverse_frac=mean("reverse_frac"),

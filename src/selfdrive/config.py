@@ -19,6 +19,7 @@ import yaml
 
 from .dynamics.base import CarParams
 from .envs.car_env import EnvConfig
+from .envs.goals import GoalConfig
 from .envs.obs import ObsConfig
 from .envs.randomize import DomainRandConfig
 from .envs.rewards import RewardConfig
@@ -36,6 +37,7 @@ SECTIONS: dict[str, type] = {
     "reward": RewardConfig,
     "arena": ArenaParams,
     "domain_rand": DomainRandConfig,
+    "goal": GoalConfig,
 }
 
 # Degree-valued aliases accepted in YAML, mapped to the radian field they set.

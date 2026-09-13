@@ -8,7 +8,9 @@ Design notes worth knowing before changing anything here:
     is intentional: reward computed from corrupted sensors trains the policy to chase its
     own sensor artifacts, and privileged information at training time is free.
     The obstacle memory, when enabled, is an observation too: it places points using an
-    odometry estimate that drifts, never the true pose.
+    odometry estimate that drifts, never the true pose. So is the goal block, when enabled:
+    range and bearing from that same estimate. Goal progress and arrival, being reward,
+    use the true pose.
 *   Every episode resamples domain randomization from `self.np_random`, so a given seed
     reproduces the whole episode - arena, car, noise - exactly.
 """
@@ -29,6 +31,7 @@ from ..sensors.depth_arc import DepthArc, DepthArcParams
 from ..sensors.odometry import Odometry, OdometryParams
 from ..sensors.ultrasonic import UltrasonicArray, UltrasonicParams
 from ..world.generators import ArenaParams, make_arena, sample_spawn
+from .goals import GoalConfig, GoalTracker
 from .memory import EgoMemory
 from .obs import ObsConfig, ObservationBuilder
 from .randomize import DomainRandConfig
@@ -37,6 +40,10 @@ from .rewards import RewardConfig, RewardFunction
 # Action layout. Kept as constants because the Android app indexes the same order.
 STEER = 0
 THROTTLE = 1
+
+# With goals, spawns drawn per arena before the arena itself is drawn again.
+SPAWN_TRIES = 20
+ARENA_TRIES = 5
 
 
 @dataclass
@@ -49,6 +56,7 @@ class EnvConfig:
     reward: RewardConfig = field(default_factory=RewardConfig)
     arena: ArenaParams = field(default_factory=lambda: ArenaParams(kind="random"))
     domain_rand: DomainRandConfig = field(default_factory=DomainRandConfig)
+    goal: GoalConfig = field(default_factory=GoalConfig)  # read only with obs.goal_block
     dt: float = 1.0 / 30.0
     max_steps: int = 1500  # ~50 s at 30 Hz
 
@@ -98,6 +106,8 @@ class CarEnv(gym.Env):
                 o.memory_sectors, o.memory_seconds, o.norm_memory_max,
                 points_per_step=self.cfg.depth.n_buckets + self.cfg.ultrasonic.n_sensors,
             )
+        # Likewise goals, which also need the odometry estimate the observation reads.
+        self.goals: GoalTracker | None = GoalTracker(self.cfg.goal) if o.goal_block else None
 
     # --- episode setup -------------------------------------------------------
 
@@ -148,35 +158,30 @@ class CarEnv(gym.Env):
         return d
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
-        """Options: `world` pins the arena and `pose` pins the start pose.
+        """Options: `world` pins the arena, `pose` the start pose and `goal` the first goal.
 
-        Both exist for the hand-authored evaluation scenarios (dead-end corridor, U-trap
+        They exist for the hand-authored evaluation scenarios (dead-end corridor, U-trap
         and friends), which have to place the car in an exact spot to test anything, and
-        for tests that need a known starting condition.
+        for tests that need a known starting condition. Goals after the first are drawn.
         """
         super().reset(seed=seed)
         self._apply_randomization()
         options = options or {}
 
-        self.world = options.get("world") or make_arena(self.np_random, self.cfg.arena)
-        pose = options.get("pose")
-        if pose is not None:
-            x, y, theta = (float(v) for v in pose)
-        else:
-            x, y, theta = sample_spawn(
-                self.world,
-                self.np_random,
-                self.car.p.length,
-                self.car.p.width,
-                self.cfg.arena.spawn_clearance,
-            )
+        self.world, (x, y, theta) = self._place(options)
 
         self.car.reset(x, y, theta)
         self.depth.reset(self.np_random)
         self.ultra.reset(self.np_random)
         self.reward_fn.reset(x, y, theta, self.world.bounds)
+        if self.memory is not None or self.goals is not None:
+            self._reset_odometry(x, y, theta)
         if self.memory is not None:
             self._reset_memory(x, y, theta)
+        if self.goals is not None:
+            # A child generator of its own, spawned after odometry's for the same reason.
+            self._goal_rng = self.np_random.spawn(1)[0]
+            self.goals.reset(self.world, x, y, self._goal_rng, pin=options.get("goal"))
         self.steps = 0
         self._last_action[:] = 0.0
         self._episode = {
@@ -193,7 +198,30 @@ class CarEnv(gym.Env):
         obs = self.obs_builder.reset(*self._frame())
         return obs, {"arena_primitives": self.world.n_primitives}
 
-    def _reset_memory(self, x: float, y: float, theta: float) -> None:
+    def _place(self, options: dict):
+        """The arena and the start pose.
+
+        With goals, the car never starts in a sealed pocket of floor: a spawn off the
+        largest connected stretch is drawn again, and an arena that offers none is replaced.
+        Without goals this draws exactly one arena and one spawn, as it always has, so
+        Phase 1 episodes are unchanged.
+        """
+        pose = options.get("pose")
+        tries = SPAWN_TRIES if self.goals is not None else 1
+        for _ in range(ARENA_TRIES):
+            world = options.get("world") or make_arena(self.np_random, self.cfg.arena)
+            if self.goals is not None:
+                self.goals.prepare(world)
+            if pose is not None:
+                return world, tuple(float(v) for v in pose)
+            for _ in range(tries):
+                spawn = sample_spawn(world, self.np_random, self.car.p.length,
+                                     self.car.p.width, self.cfg.arena.spawn_clearance)
+                if self.goals is None or self.goals.connected(spawn[0], spawn[1]):
+                    return world, spawn
+        return world, spawn  # every arena drawn was badly fragmented: take the last spawn
+
+    def _reset_odometry(self, x: float, y: float, theta: float) -> None:
         # A child generator for everything odometry draws. Spawning one leaves `np_random`
         # untouched, so a seed produces the same arena, car and sensor noise with the memory
         # on as with it off, and the two policies can be compared on identical episodes.
@@ -202,6 +230,8 @@ class CarEnv(gym.Env):
         params = self.cfg.odometry if drawn is None else replace(self.cfg.odometry, **drawn)
         self.odometry = Odometry(params)
         self.odometry.reset(x, y, theta)
+
+    def _reset_memory(self, x: float, y: float, theta: float) -> None:
         self.memory.reset(self.dt)
 
         # Sensor geometry in the car's frame, fixed once randomization has drawn the FOV.
@@ -217,8 +247,8 @@ class CarEnv(gym.Env):
 
     # --- stepping ------------------------------------------------------------
 
-    def _frame(self) -> tuple[np.ndarray, np.ndarray | None]:
-        """Sample the sensors once; return this step's frame and the memory ring."""
+    def _frame(self) -> tuple[np.ndarray, np.ndarray | None, np.ndarray | None]:
+        """Sample the sensors once; return this step's frame, memory ring and goal block."""
         s = self.car.state
         depth = self.depth.sample(self.world, s, self.dt, self.np_random)
         ultra = self.ultra.sample(self.world, s, self.dt, self.np_random)
@@ -236,7 +266,11 @@ class CarEnv(gym.Env):
             last_throttle=float(self._last_action[THROTTLE]),
             last_steer=float(self._last_action[STEER]),
         )
-        return frame, ring
+        goal = None
+        if self.goals is not None:
+            odo = self.odometry
+            goal = self.obs_builder.goal(*self.goals.vector(odo.x, odo.y, odo.theta))
+        return frame, ring, goal
 
     def _remember(self, depth: np.ndarray, ultra: np.ndarray) -> np.ndarray:
         """Store this step's new obstacle readings and return the ring the policy sees."""
@@ -285,6 +319,9 @@ class CarEnv(gym.Env):
 
         collided = self.world.collides(state.x, state.y, state.theta, p.length, p.width)
         clearance = self.world.clearance(state.x, state.y, state.theta, p.length, p.width)
+        progress, reached = 0.0, False
+        if self.goals is not None:
+            progress, reached = self.goals.update(state.x, state.y, self._goal_rng)
 
         reward, terms = self.reward_fn(
             x=state.x,
@@ -297,6 +334,8 @@ class CarEnv(gym.Env):
             clearance=clearance,
             collided=collided,
             dt=self.dt,
+            progress_m=progress,
+            reached=reached,
         )
 
         self._last_action = action
@@ -312,22 +351,24 @@ class CarEnv(gym.Env):
         self._episode["lock_steps"] += float(abs(action[STEER]) > 0.8 and action[THROTTLE] > 0)
         self._episode["collided"] = float(collided)
 
-        if self.memory is not None and self.odometry.update(
-            state.x, state.y, state.theta, self.dt, self._odometry_rng
-        ):
-            self.memory.clear()  # tracking lost: nothing stored relates to the new pose
+        if self.odometry is not None:
+            lost = self.odometry.update(state.x, state.y, state.theta, self.dt, self._odometry_rng)
+            if lost and self.memory is not None:
+                self.memory.clear()  # tracking lost: nothing stored relates to the new pose
         obs = self.obs_builder.push(*self._frame())
         terminated = bool(collided)
         truncated = bool(self.steps >= self.cfg.max_steps or self.reward_fn.is_stalled)
 
         info: dict = {"reward_terms": terms.as_dict(), "clearance": clearance}
+        if reached:
+            info["goal_reached"] = True
         if terminated or truncated:
             info["episode_metrics"] = self._summary(truncated)
         return obs, float(reward), terminated, truncated, info
 
     def _summary(self, truncated: bool) -> dict[str, float]:
         n = max(self.steps, 1)
-        return {
+        out = {
             "distance_m": self._episode["distance"],
             # Path length rewards orbiting an open patch; covered floor area does not.
             "coverage_m2": self.reward_fn.coverage_m2,
@@ -343,6 +384,11 @@ class CarEnv(gym.Env):
             "stuck": float(truncated and self.reward_fn.is_stalled),
             "steps": float(self.steps),
         }
+        if self.goals is not None:
+            out["goals_reached"] = float(self.goals.reached)
+            # Net path metres closed across every goal, the one being driven to included.
+            out["goal_progress_m"] = self.goals.progress_m
+        return out
 
     # --- rendering -----------------------------------------------------------
 
