@@ -1,7 +1,6 @@
 # Waypoint driving: env_phase1_memory_light_big.yaml plus a goal. Reach a goal, get the next.
 # The observation gains range and bearing to the goal, the reward pays for path distance
-# closed instead of new ground, and arenas leave no gap under 0.8 m between separate
-# obstacles. Nothing else differs (pinned in tests/test_goals.py).
+# closed instead of new ground, and nothing else differs (pinned in tests/test_goals.py).
 
 dt: 0.0333          # 30 Hz nominal; domain randomization jitters this per episode
 max_steps: 1500     # ~50 s of driving
@@ -84,8 +83,6 @@ arena:
   walls_per_100m2: [6.0, 11.0]  # interior walls scale with floor area, not a fixed count
   wall_length_m: [2.0, 8.0]     # in metres, not a fraction of the arena size
   doorway_prob: 0.55
-  doorway_width: [0.8, 1.2]     # no narrower than min_passage
-  min_passage: 0.8              # walls and cones leaving a narrower gap are redrawn
   cone_density: [0.02, 0.10]
   spawn_clearance: 0.5
 
@@ -106,6 +103,6 @@ goal:
   distance_min: 2.0     # path distance from the car to a new goal
   distance_max: 12.0
   clearance: 0.5        # no goal closer than this to any obstacle
-  grid_res: 0.2         # path-distance raster
-  inflate: 0.2          # cell centres closer than this to an obstacle are blocked
-  drivable_width: 0.8   # spawns and goals only on floor joined by passages this wide
+  grid_res: 0.075       # navigation raster; doorways from 0.30 m always pass at this size
+  turn_radius: 0.70     # plan with the least agile randomized car: 0.275 m wheelbase, 22 deg
+  headings: 16          # heading steps in the pose lattice

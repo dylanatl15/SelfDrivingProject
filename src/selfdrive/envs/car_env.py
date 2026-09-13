@@ -107,7 +107,8 @@ class CarEnv(gym.Env):
                 points_per_step=self.cfg.depth.n_buckets + self.cfg.ultrasonic.n_sensors,
             )
         # Likewise goals, which also need the odometry estimate the observation reads.
-        self.goals: GoalTracker | None = GoalTracker(self.cfg.goal) if o.goal_block else None
+        self.goals: GoalTracker | None = (
+            GoalTracker(self.cfg.goal, self.cfg.car) if o.goal_block else None)
 
     # --- episode setup -------------------------------------------------------
 
@@ -217,7 +218,7 @@ class CarEnv(gym.Env):
             for _ in range(tries):
                 spawn = sample_spawn(world, self.np_random, self.car.p.length,
                                      self.car.p.width, self.cfg.arena.spawn_clearance)
-                if self.goals is None or self.goals.connected(spawn[0], spawn[1]):
+                if self.goals is None or self.goals.connected(*spawn):
                     return world, spawn
         return world, spawn  # every arena drawn was badly fragmented: take the last spawn
 

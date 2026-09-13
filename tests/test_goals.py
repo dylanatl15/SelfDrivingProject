@@ -22,6 +22,7 @@ from selfdrive.eval.evaluate import ConstantPolicy, EvalResult, run_episodes
 from selfdrive.world.generators import ArenaParams
 from selfdrive.world.geometry import World, point_seg_distance
 from selfdrive.world.navigation import AXIS, DIAG, NavGrid, PathField
+from selfdrive.world.reachability import PoseReach
 
 
 def box(size: float, *walls) -> World:
@@ -118,19 +119,91 @@ def test_a_sealed_pocket_is_unreachable_and_off_the_connected_floor():
     tracker.prepare(box(10.0, *POCKET))
     field = tracker.grid.field_from(8.0, 8.0)
     assert not math.isfinite(tracker.grid.distance(field, 3.0, 3.0))
-    assert tracker.connected(8.0, 8.0)
-    assert not tracker.connected(3.0, 3.0)
+    assert tracker.connected(8.0, 8.0, 0.0)
+    assert not tracker.connected(3.0, 3.0, 0.0)
 
 
-@pytest.mark.parametrize(("door", "joined"), [(0.6, False), (1.2, True)])
-def test_a_room_only_counts_as_reachable_through_a_drivable_door(door, joined):
-    room = [(1.0, 1.0, 5.0, 1.0), (5.0, 1.0, 5.0, 2.0), (5.0, 2.0 + door, 5.0, 5.0),
-            (5.0, 5.0, 1.0, 5.0), (1.0, 5.0, 1.0, 1.0)]
+# --- where the car fits ------------------------------------------------------
+
+def walled(x1: float, y1: float, *walls) -> World:
+    outer = [[0, 0, x1, 0], [x1, 0, x1, y1], [x1, y1, 0, y1], [0, y1, 0, 0]]
+    return World(segments=outer + [list(w) for w in walls], bounds=(0.0, 0.0, x1, y1))
+
+
+def drives_to(world: World, start, end, res: float = 0.075) -> bool:
+    """Whether the car can drive from pose `start` to point `end`, at any heading."""
+    reach = PoseReach(NavGrid(world, res, 0.1, clearance_cap=0.5), 0.40, 0.20, 0.70)
+    _, i, j = reach.index(*end, 0.0)
+    return bool(reach.flood(reach.index(*start))[:, i, j].any())
+
+
+@pytest.mark.parametrize("centre", [3.0, 3.0375, 3.02])  # half a cell off the lattice, on it
+def test_the_car_drives_through_a_doorway_30_cm_wide_wherever_it_sits(centre):
+    world = box(6.0, (2.0, 0.0, 2.0, centre - 0.15), (2.0, centre + 0.15, 2.0, 6.0))
+    assert drives_to(world, (4.0, 3.0, math.pi), (1.0, 3.0))
     tracker = GoalTracker()
-    tracker.prepare(box(10.0, *room))
-    assert math.isfinite(tracker.grid.distance(tracker.grid.field_from(8.0, 8.0), 3.0, 3.0))
-    assert tracker.connected(8.0, 8.0)
-    assert tracker.connected(3.0, 3.0) == joined
+    tracker.prepare(world)
+    assert tracker.connected(1.0, 3.0, 0.0)
+    assert math.isfinite(tracker.grid.distance(tracker.grid.field_from(4.0, 3.0), 1.0, 3.0))
+
+
+def test_a_corridor_the_car_can_only_drive_straight_along_leaves_no_holes_in_the_floor():
+    # 0.32 m wide and 4 m long between two rooms: no room to turn, so every pose along it is
+    # reached by straight runs alone, and path distance must still cross it cell by cell.
+    world = box(10.0, (3.0, 0.0, 3.0, 4.84), (3.0, 5.16, 3.0, 10.0), (7.0, 0.0, 7.0, 4.84),
+                (7.0, 5.16, 7.0, 10.0), (3.0, 4.84, 7.0, 4.84), (3.0, 5.16, 7.0, 5.16))
+    tracker = GoalTracker()
+    tracker.prepare(world)
+    g = tracker.grid
+    row = round((5.0 - g.origin[1]) / g.res)
+    along = ~g.blocked[round((3.2 - g.origin[0]) / g.res) : round((6.8 - g.origin[0]) / g.res), row]
+    assert along.all()
+    d = g.distance(g.field_from(1.5, 5.0), 8.5, 5.0)
+    assert 7.0 - 0.1 <= d <= 7.0 + 0.3
+
+
+def test_a_doorway_narrower_than_the_car_is_a_wall():
+    world = box(6.0, (2.0, 0.0, 2.0, 2.9425), (2.0, 3.1325, 2.0, 6.0))  # 0.19 m, on the lattice
+    assert not drives_to(world, (4.0, 3.0, math.pi), (1.0, 3.0))
+    tracker = GoalTracker()
+    tracker.prepare(world)
+    assert not tracker.connected(1.0, 3.0, 0.0)
+    assert not math.isfinite(tracker.grid.distance(tracker.grid.field_from(4.0, 3.0), 1.0, 3.0))
+
+
+@pytest.mark.parametrize(("width", "turns"), [(0.27, False), (0.8, True)])
+def test_a_corridor_the_car_fits_along_may_have_a_corner_it_cannot_fit_round(width, turns):
+    # Room A (x < 4) opens into an L: right along y = 2, then up into room C (y > 6).
+    w = width
+    world = walled(10.0, 10.0,
+                   (4.0, 0.0, 4.0, 2.0), (4.0, 2.0 + w, 4.0, 10.0),  # A's wall and door
+                   (4.0, 2.0, 5.0 + w, 2.0), (4.0, 2.0 + w, 5.0, 2.0 + w),  # along
+                   (5.0, 2.0 + w, 5.0, 6.0), (5.0 + w, 2.0, 5.0 + w, 6.0),  # up
+                   (4.0, 6.0, 5.0, 6.0), (5.0 + w, 6.0, 10.0, 6.0))  # C's wall and door
+    start = (2.0, 2.0 + w / 2, 0.0)
+    assert drives_to(world, start, (4.6, 2.0 + w / 2), res=0.05)
+    assert drives_to(world, start, (7.0, 8.0), res=0.05) == turns
+    # A floor inflated by the car's half-width alone cannot tell the difference.
+    flat = NavGrid(world, 0.05, 0.1)
+    assert math.isfinite(flat.distance(flat.field_from(*start[:2]), 7.0, 8.0))
+
+
+@pytest.mark.parametrize(("width", "turns"), [(0.40, False), (1.0, True)])
+def test_turning_round_in_a_dead_end_takes_reversing_and_room_for_the_body(width, turns):
+    # Too narrow for a U-turn on the turning radius either way, so it takes a 3-point turn,
+    # and under 0.45 m the body cannot swing round at all.
+    world = walled(3.0, width)
+    assert drives_to(world, (1.5, width / 2, 0.0), (1.5, width / 2)) is True
+    reach = PoseReach(NavGrid(world, 0.05, 0.1, clearance_cap=0.5), 0.40, 0.20, 0.70)
+    poses = reach.flood(reach.index(1.5, width / 2, 0.0))
+    assert bool(poses[reach.index(1.5, width / 2, math.pi)]) == turns
+
+
+def test_goals_plan_for_the_least_agile_car_domain_randomization_draws():
+    cfg = load_env_config("configs/env_waypoint.yaml")
+    dr = cfg.domain_rand
+    widest = cfg.car.wheelbase * dr.wheelbase_scale[1] / math.tan(math.radians(dr.max_steer_deg[0]))
+    assert cfg.goal.turn_radius >= widest
 
 
 def test_goals_are_drawn_in_path_range_clear_of_obstacles_and_reproducibly():
@@ -300,7 +373,7 @@ def test_waypoint_arenas_never_spawn_the_car_where_its_goal_is_unreachable():
     for seed in range(10):
         e.reset(seed=seed)
         s = e.car.state
-        assert e.goals.connected(s.x, s.y)
+        assert e.goals.connected(s.x, s.y, s.theta)
         assert 1.4 <= e.goals.remaining <= 12.6
 
 
@@ -349,9 +422,7 @@ def test_waypoint_config_is_memory_light_big_plus_a_goal_and_nothing_else():
     base = load_yaml("configs/env_phase1_memory_light_big.yaml")
     ours = load_yaml("configs/env_waypoint.yaml")
     assert set(ours.pop("goal")) == {"radius", "distance_min", "distance_max", "clearance",
-                                     "grid_res", "inflate", "drivable_width"}
-    assert {k: ours["arena"].pop(k) for k in ("doorway_width", "min_passage")} == {
-        "doorway_width": [0.8, 1.2], "min_passage": 0.8}
+                                     "grid_res", "turn_radius", "headings"}
     assert {k: ours["obs"].pop(k) for k in ("goal_block", "norm_goal_max")} == {
         "goal_block": True, "norm_goal_max": 15.0}
     assert {k: ours["reward"].pop(k) for k in ("w_explore", "w_progress", "goal_bonus")} == {
