@@ -7,7 +7,7 @@ from stable_baselines3 import PPO
 
 from selfdrive.config import load_env_config
 from selfdrive.envs.car_env import CarEnv
-from selfdrive.export.to_onnx import DeterministicPolicy
+from selfdrive.export.to_onnx import DeterministicPolicy, export, verify
 
 
 @pytest.mark.parametrize("kwargs", [
@@ -27,3 +27,12 @@ def test_export_graph_matches_the_sb3_deterministic_action(kwargs):
     with th.no_grad():
         exported = DeterministicPolicy(model.policy.eval())(th.as_tensor(obs)).numpy()
     np.testing.assert_allclose(exported, expected, atol=1e-5)
+
+
+def test_export_writes_one_self_contained_file(tmp_path):
+    model = PPO("MlpPolicy", CarEnv(load_env_config("configs/env_nodr.yaml")), use_sde=True,
+                policy_kwargs={"net_arch": [16], "squash_output": True}, device="cpu", seed=0)
+    model.save(tmp_path / "policy.zip")
+    out = export(tmp_path / "policy.zip", tmp_path / "phone" / "policy.onnx")
+    assert [p.name for p in out.parent.iterdir()] == ["policy.onnx"]  # no .onnx.data beside it
+    assert verify(tmp_path / "policy.zip", out) < 1e-4
