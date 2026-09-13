@@ -54,6 +54,16 @@ mean near |5|, and both ended at full lock. `train_ppo_v4.yaml` bounds actions w
 (squashed gSDE) instead. On a clipped-Gaussian run, watch `train/std` and the raw policy
 mean. Under gSDE, `train/std` is the noise-matrix scale, not the action std.
 
+`phase1_v5` and `phase1_mem_v2` then plateaued near 13 m² of clean coverage by 5M steps.
+Three things there are easy to misread. The arenas are cramped: 59 % of reachable free
+space lies within 1 m of an obstacle, so driving that close is not wall-hugging, and
+v5's 20 % meant it was avoiding clutter. Coverage is capped by speed, not arena size: a
+50 s episode sweeps at most ~25 m² per 1 m/s. And the eval's `reverse` column counts
+negative throttle commands, which are mostly braking; `backing` counts the car rolling
+backwards. mem_v2 held ~0.7 m/s by flipping the sign of its throttle 4.5 times a second,
+and its steering between full locks as often. `env_phase1_smooth.yaml` charges changes on
+both actuators (`w_throttle_oscillation`).
+
 ## Throughput ceiling - do not chase it
 
 `python -m selfdrive.train.bench` reports ~900 steps/s single-process and ~4,800 across

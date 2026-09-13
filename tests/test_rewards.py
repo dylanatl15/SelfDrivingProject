@@ -121,6 +121,19 @@ def test_reversing_still_beats_sitting_wedged():
     assert reverse > parked
 
 
+def test_braking_counts_as_a_reverse_command_but_not_as_backing():
+    # phase1_mem_v2's "reverse 32 %" was mostly braking: the car rolled backwards on 5 %.
+    env = open_env(max_steps=61)
+    env.reset(seed=0, options={"world": OPEN_FIELD, "pose": (0.0, 0.0, 0.0)})
+    for i in range(61):
+        action = np.asarray([0.0, 1.0 if i < 60 else -1.0], dtype=np.float32)
+        _, _, terminated, truncated, info = env.step(action)
+    assert truncated and not terminated
+    metrics = info["episode_metrics"]
+    assert metrics["reverse_frac"] > 0.0
+    assert metrics["backing_frac"] == 0.0
+
+
 def test_crashing_is_catastrophic():
     wall = World(segments=[[3.0, -5.0, 3.0, 5.0]], bounds=(-10.0, -10.0, 10.0, 10.0))
     env = open_env(max_steps=400)
@@ -157,7 +170,8 @@ def drive(fn: RewardFunction, poses, clearance: float = math.inf, throttle: floa
     x, y, theta = poses[0]
     fn.reset(x, y, theta, BOUNDS)
     return [
-        fn(x=x, y=y, theta=theta, throttle_cmd=throttle, steer_cmd=0.0, prev_steer_cmd=0.0,
+        fn(x=x, y=y, theta=theta, throttle_cmd=throttle, steer_cmd=0.0,
+           prev_throttle_cmd=throttle, prev_steer_cmd=0.0,
            clearance=clearance, collided=False, dt=DT)[1]
         for x, y, theta in poses[1:]
     ]
@@ -236,7 +250,8 @@ def test_stall_fires_on_displacement_not_on_zero_speed():
     # Wheels spinning, throttle pinned, car wedged and creeping by a millimetre a step.
     for i in range(c.stall_window + 5):
         _, terms = fn(x=0.0005 * i, y=0.0, theta=0.0, throttle_cmd=1.0, steer_cmd=0.0,
-                      prev_steer_cmd=0.0, clearance=0.05, collided=False, dt=DT)
+                      prev_throttle_cmd=1.0, prev_steer_cmd=0.0,
+                      clearance=0.05, collided=False, dt=DT)
     assert terms.stall < 0.0
     assert fn.stalled_steps > 0
 
@@ -246,12 +261,13 @@ def test_stall_clears_once_the_car_moves_again():
     fn = RewardFunction(c)
     fn.reset(0.0, 0.0, 0.0, BOUNDS)
     for _ in range(c.stall_window + 5):
-        fn(x=0.0, y=0.0, theta=0.0, throttle_cmd=1.0, steer_cmd=0.0, prev_steer_cmd=0.0,
+        fn(x=0.0, y=0.0, theta=0.0, throttle_cmd=1.0, steer_cmd=0.0,
+           prev_throttle_cmd=1.0, prev_steer_cmd=0.0,
            clearance=0.05, collided=False, dt=DT)
     assert fn.stalled_steps > 0
     for i in range(c.stall_window + 1):
         fn(x=1.0 * i * DT * 10, y=0.0, theta=0.0, throttle_cmd=1.0, steer_cmd=0.0,
-           prev_steer_cmd=0.0, clearance=math.inf, collided=False, dt=DT)
+           prev_throttle_cmd=1.0, prev_steer_cmd=0.0, clearance=math.inf, collided=False, dt=DT)
     assert fn.stalled_steps == 0
 
 
@@ -260,11 +276,13 @@ def test_is_stalled_needs_sustained_stalling():
     fn = RewardFunction(c)
     fn.reset(0.0, 0.0, 0.0, BOUNDS)
     for _ in range(c.stall_window + 5):
-        fn(x=0.0, y=0.0, theta=0.0, throttle_cmd=1.0, steer_cmd=0.0, prev_steer_cmd=0.0,
+        fn(x=0.0, y=0.0, theta=0.0, throttle_cmd=1.0, steer_cmd=0.0,
+           prev_throttle_cmd=1.0, prev_steer_cmd=0.0,
            clearance=0.05, collided=False, dt=DT)
     assert not fn.is_stalled
     for _ in range(c.stall_limit):
-        fn(x=0.0, y=0.0, theta=0.0, throttle_cmd=1.0, steer_cmd=0.0, prev_steer_cmd=0.0,
+        fn(x=0.0, y=0.0, theta=0.0, throttle_cmd=1.0, steer_cmd=0.0,
+           prev_throttle_cmd=1.0, prev_steer_cmd=0.0,
            clearance=0.05, collided=False, dt=DT)
     assert fn.is_stalled
 
@@ -293,22 +311,41 @@ def test_oscillation_penalty_tracks_steering_change():
     fn = RewardFunction(RewardConfig())
     fn.reset(0.0, 0.0, 0.0, BOUNDS)
     _, smooth = fn(x=0.0, y=0.0, theta=0.0, throttle_cmd=1.0, steer_cmd=0.5,
-                   prev_steer_cmd=0.5, clearance=math.inf, collided=False, dt=DT)
+                   prev_throttle_cmd=1.0, prev_steer_cmd=0.5,
+                   clearance=math.inf, collided=False, dt=DT)
     fn.reset(0.0, 0.0, 0.0, BOUNDS)
     _, jerky = fn(x=0.0, y=0.0, theta=0.0, throttle_cmd=1.0, steer_cmd=1.0,
-                  prev_steer_cmd=-1.0, clearance=math.inf, collided=False, dt=DT)
+                  prev_throttle_cmd=1.0, prev_steer_cmd=-1.0,
+                  clearance=math.inf, collided=False, dt=DT)
     assert smooth.oscillation == 0.0
     assert jerky.oscillation < 0.0
+
+
+def test_throttle_oscillation_is_off_unless_configured_and_tracks_throttle_change():
+    def oscillation(config, throttle, prev_throttle):
+        fn = RewardFunction(config)
+        fn.reset(0.0, 0.0, 0.0, BOUNDS)
+        _, terms = fn(x=0.0, y=0.0, theta=0.0, throttle_cmd=throttle,
+                      prev_throttle_cmd=prev_throttle, steer_cmd=0.0, prev_steer_cmd=0.0,
+                      clearance=math.inf, collided=False, dt=DT)
+        return terms.oscillation
+
+    assert oscillation(RewardConfig(), 1.0, -1.0) == 0.0
+    smooth = RewardConfig(w_throttle_oscillation=0.15)
+    assert oscillation(smooth, 0.5, 0.5) == 0.0
+    assert oscillation(smooth, 1.0, -1.0) == pytest.approx(-0.3)
 
 
 def test_reverse_costs_only_when_reversing():
     fn = RewardFunction(RewardConfig())
     fn.reset(0.0, 0.0, 0.0, BOUNDS)
     _, fwd = fn(x=0.0, y=0.0, theta=0.0, throttle_cmd=1.0, steer_cmd=0.0,
-                prev_steer_cmd=0.0, clearance=math.inf, collided=False, dt=DT)
+                prev_throttle_cmd=1.0, prev_steer_cmd=0.0,
+                clearance=math.inf, collided=False, dt=DT)
     fn.reset(0.0, 0.0, 0.0, BOUNDS)
     _, rev = fn(x=0.0, y=0.0, theta=0.0, throttle_cmd=-1.0, steer_cmd=0.0,
-                prev_steer_cmd=0.0, clearance=math.inf, collided=False, dt=DT)
+                prev_throttle_cmd=-1.0, prev_steer_cmd=0.0,
+                clearance=math.inf, collided=False, dt=DT)
     assert fwd.reverse == 0.0
     assert rev.reverse < 0.0
 
@@ -317,7 +354,8 @@ def test_terms_sum_to_the_total():
     fn = RewardFunction(RewardConfig())
     drive(fn, line(1.0, 80), clearance=0.3)
     total, terms = fn(x=3.0, y=0.456, theta=0.1, throttle_cmd=-0.5, steer_cmd=0.3,
-                      prev_steer_cmd=0.0, clearance=0.3, collided=True, dt=DT)
+                      prev_throttle_cmd=-0.5, prev_steer_cmd=0.0,
+                      clearance=0.3, collided=True, dt=DT)
     assert total == pytest.approx(terms.total)
     assert total == pytest.approx(sum(terms.as_dict().values()))
 
@@ -387,3 +425,26 @@ def test_crash25_config_is_phase1_with_only_collision_penalty_changed():
     assert base["reward"].pop("collision_penalty") == 100.0
     assert crash25["reward"].pop("collision_penalty") == 25.0
     assert crash25 == base
+
+
+def test_smooth_config_is_phase1_with_only_the_oscillation_weights_changed():
+    base = yaml.safe_load((CONFIGS / "env_phase1.yaml").read_text())
+    smooth = yaml.safe_load((CONFIGS / "env_phase1_smooth.yaml").read_text())
+    for key, before, after in (("w_oscillation", 0.05, 0.15),
+                               ("w_throttle_oscillation", 0.0, 0.15)):
+        assert base["reward"].pop(key) == before
+        assert smooth["reward"].pop(key) == after
+    assert smooth == base
+
+
+def test_smooth_reward_keeps_backing_out_of_a_trap_and_holding_the_throttle():
+    """Charging throttle changes must not make sitting wedged cheaper than reversing, and
+    pumping the throttle must still lose to holding it."""
+    smooth = load_env_config(CONFIGS / "env_phase1_smooth.yaml").reward
+    parked = rollout(open_env(reward=smooth), [0.0, 0.0])
+    reverse = rollout(open_env(reward=smooth), [0.0, -1.0])
+    forward = rollout(open_env(reward=smooth), [0.0, 1.0])
+    pumping = rollout(open_env(reward=smooth),
+                      lambda i: [0.0, 1.0 if (i // 10) % 2 == 0 else -1.0])
+    assert parked < reverse < forward
+    assert pumping < forward

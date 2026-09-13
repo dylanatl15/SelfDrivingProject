@@ -77,6 +77,7 @@ class RewardConfig:
     w_retrace: float = 0.0  # per metre of ground covered again within revisit_s; 0 = off
     w_reverse: float = 0.02  # per step at full reverse
     w_oscillation: float = 0.05  # per unit change in the steering command
+    w_throttle_oscillation: float = 0.0  # per unit change in the throttle command; 0 = off
     w_lateral: float = 0.05  # per step at lateral_accel_ref; quadratic
     w_proximity: float = 0.05  # per step at zero clearance
     w_stall: float = 0.50  # per step while wedged
@@ -252,6 +253,7 @@ class RewardFunction:
         y: float,
         theta: float,
         throttle_cmd: float,
+        prev_throttle_cmd: float,
         steer_cmd: float,
         prev_steer_cmd: float,
         clearance: float,
@@ -275,8 +277,14 @@ class RewardFunction:
         # Reversing is allowed and sometimes necessary, but it is never free.
         t.reverse = -c.w_reverse * max(0.0, -float(throttle_cmd))
 
-        # Jitter wrecks a real steering servo and looks terrible on a demo table.
-        t.oscillation = -c.w_oscillation * abs(float(steer_cmd) - float(prev_steer_cmd))
+        # Jitter wrecks a real steering servo and looks terrible on a demo table. Throttle
+        # jitter is the same habit on the other actuator: phase1_mem_v2 flipped the sign of
+        # its throttle 4.5 times a second to hold ~0.7 m/s, which the sim's motor lag smooths
+        # over and a real ESC may not.
+        t.oscillation = (
+            -c.w_oscillation * abs(float(steer_cmd) - float(prev_steer_cmd))
+            - c.w_throttle_oscillation * abs(float(throttle_cmd) - float(prev_throttle_cmd))
+        )
 
         # Lateral acceleration = speed x yaw rate, measured from consecutive poses rather
         # than read out of the vehicle model, so it survives swapping the model.
