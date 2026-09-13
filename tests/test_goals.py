@@ -122,6 +122,17 @@ def test_a_sealed_pocket_is_unreachable_and_off_the_connected_floor():
     assert not tracker.connected(3.0, 3.0)
 
 
+@pytest.mark.parametrize(("door", "joined"), [(0.6, False), (1.2, True)])
+def test_a_room_only_counts_as_reachable_through_a_drivable_door(door, joined):
+    room = [(1.0, 1.0, 5.0, 1.0), (5.0, 1.0, 5.0, 2.0), (5.0, 2.0 + door, 5.0, 5.0),
+            (5.0, 5.0, 1.0, 5.0), (1.0, 5.0, 1.0, 1.0)]
+    tracker = GoalTracker()
+    tracker.prepare(box(10.0, *room))
+    assert math.isfinite(tracker.grid.distance(tracker.grid.field_from(8.0, 8.0), 3.0, 3.0))
+    assert tracker.connected(8.0, 8.0)
+    assert tracker.connected(3.0, 3.0) == joined
+
+
 def test_goals_are_drawn_in_path_range_clear_of_obstacles_and_reproducibly():
     world = box(12.0, (6.0, 0.0, 6.0, 9.0), (2.0, 6.0, 4.5, 6.0))
     grid = NavGrid(world, res=0.2, inflate=0.2, clearance_cap=0.5)
@@ -338,7 +349,9 @@ def test_waypoint_config_is_memory_light_big_plus_a_goal_and_nothing_else():
     base = load_yaml("configs/env_phase1_memory_light_big.yaml")
     ours = load_yaml("configs/env_waypoint.yaml")
     assert set(ours.pop("goal")) == {"radius", "distance_min", "distance_max", "clearance",
-                                     "grid_res", "inflate"}
+                                     "grid_res", "inflate", "drivable_width"}
+    assert {k: ours["arena"].pop(k) for k in ("doorway_width", "min_passage")} == {
+        "doorway_width": [0.8, 1.2], "min_passage": 0.8}
     assert {k: ours["obs"].pop(k) for k in ("goal_block", "norm_goal_max")} == {
         "goal_block": True, "norm_goal_max": 15.0}
     assert {k: ours["reward"].pop(k) for k in ("w_explore", "w_progress", "goal_bonus")} == {

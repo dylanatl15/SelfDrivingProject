@@ -69,7 +69,9 @@ should stop the car instead.
   of it. At that point the next goal appears. Advance to the next waypoint, or stop, at
   the same distance.
 - **Goal placement.** Training goals are always at least 0.5 m from any obstacle, and
-  always reachable: the car never starts in a sealed-off pocket.
+  always reachable by a route with no passage narrower than 0.8 m. The training arenas
+  have no gaps under 0.8 m at all. A goal the app places behind a narrower gap, or in a
+  closed room, is outside anything the model has seen: check reachability on the phone.
 - **Goal distance.** Training goals are 2-12 m away along the drivable path.
 - **Longer routes.** Beyond 15 m straight-line, the range input saturates and the model
   sees only "far". For a longer route, feed waypoints no more than about 10 m apart.

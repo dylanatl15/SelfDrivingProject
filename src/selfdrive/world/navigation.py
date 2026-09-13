@@ -226,14 +226,17 @@ class NavGrid:
         return float(field[near]) + math.hypot(x - cx, y - cy)
 
     def sample_goal(self, field: np.ndarray, rng: np.random.Generator,
-                    distance: tuple[float, float], clearance: float) -> tuple[float, float] | None:
-        """A random cell centre at a path distance within `distance` and at least `clearance`
-        from every obstacle. If no cell is in range, the farthest cell that is clear enough,
-        so a car boxed into a small pocket still has somewhere to go. None if there is no
-        such cell at all."""
+                    distance: tuple[float, float], clearance: float,
+                    allowed: np.ndarray | None = None) -> tuple[float, float] | None:
+        """A random cell centre at a path distance within `distance`, at least `clearance`
+        from every obstacle, and inside the `allowed` mask if one is given. If no cell is in
+        range, the farthest cell that qualifies otherwise, so a car boxed into a small pocket
+        still has somewhere to go. None if no cell qualifies at all."""
         if clearance > self.cap + 1e-9:
             raise ValueError(f"clearance {clearance} is beyond the raster cap {self.cap}")
         ok = np.isfinite(field) & (self.room >= clearance) & (field > 0.0)
+        if allowed is not None:
+            ok &= allowed
         in_range = np.flatnonzero(ok & (field >= distance[0]) & (field <= distance[1]))
         if in_range.size:
             k = int(in_range[rng.integers(in_range.size)])
