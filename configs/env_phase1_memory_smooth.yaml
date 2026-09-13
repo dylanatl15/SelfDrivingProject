@@ -1,3 +1,7 @@
+# env_phase1_memory.yaml with smoothness charged on both actuators, as env_phase1_smooth.yaml
+# does for env_phase1.yaml: w_oscillation 0.05 -> 0.15 and w_throttle_oscillation 0 -> 0.15.
+# Nothing else differs.
+
 # env_phase1.yaml plus the obstacle memory ring. Everything outside `obs` and
 # `odometry` is kept identical, so a seed gives the same episode in both.
 # Phase 1: drive forward, do not crash, never stay stuck. No waypoints.
@@ -58,8 +62,8 @@ reward:
   w_explore: 1.0        # per metre of new ground
   w_retrace: 0.0        # per metre over ground already covered; env_phase1_retrace.yaml sets it
   w_reverse: 0.02
-  w_oscillation: 0.05
-  w_throttle_oscillation: 0.0
+  w_oscillation: 0.15
+  w_throttle_oscillation: 0.15
   w_lateral: 0.05
   w_proximity: 0.05
   w_stall: 0.5

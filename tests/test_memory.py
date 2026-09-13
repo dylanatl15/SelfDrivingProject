@@ -395,3 +395,13 @@ def test_memory_config_gives_116_inputs():
     assert cfg.obs.size == 116
     obs, _ = CarEnv(cfg).reset(seed=0)
     assert obs.shape == (116,)
+
+
+def test_memory_smooth_config_is_the_memory_config_with_only_oscillation_weights_changed():
+    mem = load_yaml("configs/env_phase1_memory.yaml")
+    smooth = load_yaml("configs/env_phase1_memory_smooth.yaml")
+    for key, before, after in (("w_oscillation", 0.05, 0.15),
+                               ("w_throttle_oscillation", 0.0, 0.15)):
+        assert mem["reward"].pop(key) == before
+        assert smooth["reward"].pop(key) == after
+    assert smooth == mem
