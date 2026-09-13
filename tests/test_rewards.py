@@ -12,10 +12,13 @@ coverage grid tried as the fix scored a slow weave above a straight line.
 
 import math
 from functools import cache
+from pathlib import Path
 
 import numpy as np
 import pytest
+import yaml
 
+from selfdrive.config import load_env_config
 from selfdrive.envs.car_env import CarEnv, EnvConfig
 from selfdrive.envs.randomize import DomainRandConfig
 from selfdrive.envs.rewards import RewardConfig, RewardFunction
@@ -32,11 +35,12 @@ OPEN_FIELD = World(segments=[[-60, -60, 60, -60], [60, -60, 60, 60],
 GUARD_STEPS = 900
 
 
-def open_env(max_steps: int = 400) -> CarEnv:
+def open_env(max_steps: int = 400, reward: RewardConfig | None = None) -> CarEnv:
     """Empty arena, randomization off, so only the policy differs between runs."""
     cfg = EnvConfig(
         arena=ArenaParams(kind="outdoor"),
         domain_rand=DomainRandConfig(enabled=False),
+        reward=reward or RewardConfig(),
         max_steps=max_steps,
     )
     return CarEnv(cfg)
@@ -316,3 +320,62 @@ def test_terms_sum_to_the_total():
                       prev_steer_cmd=0.0, clearance=0.3, collided=True, dt=DT)
     assert total == pytest.approx(terms.total)
     assert total == pytest.approx(sum(terms.as_dict().values()))
+
+
+# --- the retrace charge --------------------------------------------------------
+
+RETRACE = RewardConfig(w_retrace=0.5)
+CONFIGS = Path(__file__).resolve().parents[1] / "configs"
+
+
+def test_retrace_is_off_unless_configured():
+    assert RewardConfig().w_retrace == 0.0
+    assert all(t.retrace == 0.0 for t in drive(RewardFunction(), circle(1.5, 1.0, laps=2.0)))
+
+
+@pytest.mark.parametrize("speed", [0.35, 1.0])
+@pytest.mark.parametrize("heading_deg", [0.0, 15.0, 30.0, 45.0])
+def test_new_ground_is_never_charged_as_retraced(heading_deg, speed):
+    fn = RewardFunction(RETRACE)
+    terms = drive(fn, line(speed, round(6.0 / speed / DT), math.radians(heading_deg)))
+    assert all(t.retrace == 0.0 for t in terms)
+    assert fn.retrace_frac == 0.0
+
+
+def test_a_second_lap_is_charged_what_the_first_lap_paid():
+    fn = RewardFunction(RETRACE)
+    terms = drive(fn, circle(1.5, 1.0, laps=2.0))
+    paid = sum(t.explore for t in terms)
+    charged = sum(t.retrace for t in terms)
+    # The first lap is paid a little short where it closes on its own start.
+    assert charged == pytest.approx(-RETRACE.w_retrace * paid, rel=0.1)
+    assert fn.retrace_frac == pytest.approx(0.5, abs=0.03)
+
+
+def test_driving_back_over_your_own_path_is_charged():
+    out = line(1.0, 90)  # 3 m out along +x, then straight back
+    path = out + [(x, y, math.pi) for x, y, _ in reversed(out[:-1])]
+    terms = drive(RewardFunction(RETRACE), path)
+    back = sum(t.retrace for t in terms[len(out):])
+    assert back == pytest.approx(-RETRACE.w_retrace * 3.0, rel=0.15)
+
+
+def test_retrace_charge_lowers_loops_and_leaves_a_straight_line_alone():
+    """`phase1_v2` circled open patches, because explore-only pay makes every lap after
+    the first free. With `w_retrace` set a loop must cost, while straight driving, which
+    never crosses its own track, earns exactly what it did."""
+    straight = rollout(open_env(GUARD_STEPS, RETRACE), [0.0, 1.0])
+    assert straight == pytest.approx(forward_return(GUARD_STEPS))
+    loop = [0.6, 1.0]
+    charged = rollout(open_env(GUARD_STEPS, RETRACE), loop)
+    assert charged < rollout(open_env(GUARD_STEPS), loop) - 5.0
+
+
+def test_retrace_config_is_phase1_with_only_w_retrace_changed():
+    base = yaml.safe_load((CONFIGS / "env_phase1.yaml").read_text())
+    retrace = yaml.safe_load((CONFIGS / "env_phase1_retrace.yaml").read_text())
+    assert base["reward"].pop("w_retrace") == 0.0
+    assert retrace["reward"].pop("w_retrace") == RETRACE.w_retrace
+    assert retrace == base
+    loaded = load_env_config(CONFIGS / "env_phase1_retrace.yaml")
+    assert loaded.reward.w_retrace == RETRACE.w_retrace
