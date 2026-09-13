@@ -35,6 +35,15 @@ def test_final_model_outranks_checkpoints(tmp_path):
     assert newest_checkpoint(tmp_path)[0] == FINAL
 
 
+def test_a_resumed_run_passes_its_old_final_model(tmp_path):
+    _touch(tmp_path / "final_model.zip", age_s=3600)  # left behind when the run was stopped
+    _touch(tmp_path / "checkpoints" / "ppo_1000000_steps.zip", age_s=3700)
+    _touch(tmp_path / "checkpoints" / "ppo_4000000_steps.zip", age_s=100)
+    steps, path = newest_checkpoint(tmp_path)
+    assert steps == 4_000_000
+    assert path.name == "ppo_4000000_steps.zip"
+
+
 def test_nothing_yet(tmp_path):
     assert newest_checkpoint(tmp_path) is None
     assert newest_run(tmp_path / "missing") is None
