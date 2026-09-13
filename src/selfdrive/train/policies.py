@@ -15,6 +15,13 @@ PPO has no hook for an extra loss term, so the penalty rides in the entropy slot
 is `ent_coef * -mean(entropy)`, and `evaluate_actions` returns the usual entropy estimate
 minus `penalty / ent_coef`. That needs `ent_coef > 0`, and it means `train/entropy_loss`
 includes the penalty; `train/mean_penalty` logs it on its own.
+
+`log_std_min` floors the gSDE noise scale. Under `target_kl` that scale matters twice: the
+KL between two Gaussians of one std grows as (change in mean / std)^2, so narrower noise lets
+each update move the policy less. PPO narrowed it anyway. waypoint_pay5's `train/std` fell
+from 0.082 at 500k steps to 0.030 at 3M, most updates stopped early on KL, and its evals fell
+with it. The floor is applied to the parameter before each use, so the noise sampled, the
+distribution trained and `train/std` agree; `train/std_at_floor` logs how much of it binds.
 """
 
 from __future__ import annotations
@@ -25,7 +32,7 @@ from stable_baselines3.common.policies import ActorCriticPolicy
 
 class MeanPenaltyPolicy(ActorCriticPolicy):
     def __init__(self, *args, mean_margin: float = 1.5, mean_penalty: float = 0.0,
-                 ent_coef: float = 0.0, **kwargs):
+                 ent_coef: float = 0.0, log_std_min: float | None = None, **kwargs):
         if mean_penalty > 0.0 and ent_coef <= 0.0:
             raise ValueError("mean_penalty rides in the entropy term, so it needs ent_coef > 0")
         self.mean_margin = float(mean_margin)
@@ -33,7 +40,21 @@ class MeanPenaltyPolicy(ActorCriticPolicy):
         self.ent_coef = float(ent_coef)
         self.last_mean_penalty = 0.0
         self.last_mean_abs = 0.0
+        self.log_std_min = None if log_std_min is None else float(log_std_min)
         super().__init__(*args, **kwargs)
+
+    def _floor_log_std(self) -> None:
+        if self.log_std_min is not None:
+            with th.no_grad():
+                self.log_std.clamp_(min=self.log_std_min)
+
+    def reset_noise(self, n_envs: int = 1) -> None:
+        self._floor_log_std()
+        super().reset_noise(n_envs)
+
+    def _get_action_dist_from_latent(self, latent_pi: th.Tensor):
+        self._floor_log_std()
+        return super()._get_action_dist_from_latent(latent_pi)
 
     def mean_penalty_of(self, mean_actions: th.Tensor) -> th.Tensor:
         """Per-sample penalty on pre-tanh means beyond the margin, summed over action dims."""

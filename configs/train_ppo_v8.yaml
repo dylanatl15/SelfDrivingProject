@@ -1,0 +1,45 @@
+# train_ppo_v7.yaml with a floor on the gSDE noise scale: log std -3.0, std 0.050.
+#
+# Under target_kl the noise scale matters twice. The KL between two Gaussians of one std grows
+# as (change in mean / std)^2, so narrower noise lets each update move the policy less, and PPO
+# narrowed it anyway. waypoint_pay5's train/std fell from 0.082 at 500k steps to 0.051 at 1M
+# and 0.030 at 3M, most updates stopped early on KL, and its evals fell from 1.45 clean goals
+# to 0.45. The floor holds it where it stood at 1M. See src/selfdrive/train/policies.py.
+
+env_config: configs/env_phase1.yaml
+n_envs: 10
+total_timesteps: 20000000
+seed: 0
+device: cpu
+
+policy: MlpPolicy
+net_arch: [256, 256]
+
+n_steps: 1024           # x 10 workers = 10240 samples
+batch_size: 2048
+n_epochs: 10
+learning_rate: 3.0e-4
+gamma: 0.995            # ~6.7 s horizon at 30 Hz
+gae_lambda: 0.95
+clip_range: 0.2
+target_kl: 0.03
+ent_coef: 0.005         # v4's 0.0 let the steering mean saturate tanh
+vf_coef: 0.5
+max_grad_norm: 0.5
+
+use_sde: true
+sde_sample_freq: 30     # new noise every 30 steps (1 s); v5 and v6 used 4
+squash_output: true
+log_std_init: -2.0      # gSDE scale: the noise matrix std, not the action std
+mean_penalty: 0.05      # per unit^2 of pre-tanh mean past the margin, summed over actions
+mean_margin: 1.5        # tanh(1.5) = 0.91
+log_std_min: -3.0       # floor on the gSDE log noise scale; exp(-3) = 0.050
+
+normalize_reward: true
+
+eval_every_steps: 500000
+eval_episodes: 20
+video_every_steps: 2000000
+video_episodes: 2
+checkpoint_every_steps: 500000
+run_dir: runs

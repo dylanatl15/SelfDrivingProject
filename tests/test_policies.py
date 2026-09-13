@@ -2,27 +2,30 @@
 
 Squashed gSDE policies saturate: phase1_v7 held its throttle mean at +2 to +3.5 before tanh
 with a wall under 1 m ahead, where no noise sample brakes. The entropy bonus cannot pull a
-mean back, so `MeanPenaltyPolicy` adds a penalty on it through PPO's entropy term.
+mean back, so `MeanPenaltyPolicy` adds a penalty on it through PPO's entropy term. It also
+floors the gSDE noise scale, which PPO's KL cap otherwise narrows until updates stall.
 """
+
+import math
 
 import pytest
 import torch as th
 from stable_baselines3 import PPO
 from stable_baselines3.common.policies import ActorCriticPolicy
 
-from selfdrive.config import load_env_config
+from selfdrive.config import load_env_config, load_yaml
 from selfdrive.envs.car_env import CarEnv
 from selfdrive.train.policies import MeanPenaltyPolicy
 
 ENT_COEF = 0.005
 
 
-def make_policy(mean_penalty=0.05, mean_margin=1.5, bias=None):
+def make_policy(mean_penalty=0.05, mean_margin=1.5, bias=None, log_std_min=None):
     env = CarEnv(load_env_config("configs/env_nodr.yaml"))
     model = PPO(MeanPenaltyPolicy, env, use_sde=True, ent_coef=ENT_COEF, device="cpu", seed=0,
                 policy_kwargs={"net_arch": [16], "squash_output": True, "log_std_init": -2.0,
                                "mean_penalty": mean_penalty, "mean_margin": mean_margin,
-                               "ent_coef": ENT_COEF})
+                               "ent_coef": ENT_COEF, "log_std_min": log_std_min})
     policy = model.policy
     if bias is not None:
         with th.no_grad():
@@ -73,3 +76,41 @@ def test_saturated_mean_adds_the_penalty_to_the_loss_and_its_gradient_pulls_the_
 def test_mean_inside_the_margin_adds_nothing():
     policy, obs, actions = make_policy(mean_penalty=0.05, mean_margin=1.5, bias=1.0)
     assert extra_loss(policy, obs, actions).item() == pytest.approx(0.0, abs=1e-6)
+
+
+def test_the_noise_floor_holds_the_noise_sampled_and_trained_at_or_above_it():
+    policy, obs, actions = make_policy(log_std_min=-3.0)
+    with th.no_grad():
+        policy.log_std.fill_(-5.0)
+    policy.reset_noise(4)
+    assert policy.action_dist.weights_dist.scale.min().item() == pytest.approx(math.exp(-3.0))
+    with th.no_grad():
+        policy.log_std.fill_(-5.0)
+    policy.evaluate_actions(obs, actions)
+    assert policy.log_std.min().item() == pytest.approx(-3.0)
+
+
+def test_without_a_floor_the_noise_scale_is_left_alone():
+    policy, obs, actions = make_policy()
+    with th.no_grad():
+        policy.log_std.fill_(-5.0)
+    policy.reset_noise(4)
+    policy.evaluate_actions(obs, actions)
+    assert policy.log_std.max().item() == pytest.approx(-5.0)
+
+
+def test_a_run_with_a_noise_floor_trains_and_keeps_its_noise_there():
+    env = CarEnv(load_env_config("configs/env_nodr.yaml"))
+    model = PPO(MeanPenaltyPolicy, env, use_sde=True, n_steps=64, batch_size=32, n_epochs=2,
+                ent_coef=ENT_COEF, device="cpu", seed=0,
+                policy_kwargs={"net_arch": [16], "squash_output": True, "log_std_init": -4.0,
+                               "log_std_min": -3.0, "ent_coef": ENT_COEF})
+    model.learn(128)
+    assert model.policy.log_std.min().item() >= -3.0 - 1e-3  # one Adam step past it at most
+
+
+def test_train_ppo_v8_is_v7_with_a_noise_floor():
+    v7 = load_yaml("configs/train_ppo_v7.yaml")
+    v8 = load_yaml("configs/train_ppo_v8.yaml")
+    assert v8.pop("log_std_min") == -3.0
+    assert v8 == v7
