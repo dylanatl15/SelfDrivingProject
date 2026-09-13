@@ -9,7 +9,9 @@ file that could drift out of sync with the Android app. One file in, one file ou
 The graph also performs the final clip to [-1, 1]. SB3's deterministic action for a
 Box space is the raw Gaussian mean, which is *not* bounded - the vectorized env clips it
 on the way in. Baking that clip into the export means the phone cannot forget to do it
-and send an out-of-range steering angle to the ESP32.
+and send an out-of-range steering angle to the ESP32. A policy trained with squashed gSDE
+(`use_sde` + `squash_output`) is bounded by tanh instead, and the export applies that
+tanh: clipping its mean would drive the car differently from the policy that was trained.
 """
 
 from __future__ import annotations
@@ -34,7 +36,10 @@ class DeterministicPolicy(th.nn.Module):
             latent_pi, _ = self.policy.mlp_extractor(features)
         else:
             latent_pi = self.policy.mlp_extractor.forward_actor(features[0])
-        return th.clamp(self.policy.action_net(latent_pi), -1.0, 1.0)
+        mean = self.policy.action_net(latent_pi)
+        if self.policy.squash_output:
+            return th.tanh(mean)
+        return th.clamp(mean, -1.0, 1.0)
 
 
 def export(model_path: str | Path, out_path: str | Path, opset: int = 17) -> Path:
