@@ -68,6 +68,12 @@ def describe_checkpoint(steps: int) -> str:
     return "final model" if steps == FINAL else f"checkpoint {steps / 1e6:.1f}M steps"
 
 
+def window_title(run_dir: Path, label: str, episode: int) -> str:
+    """Run name first, so it survives a narrow title bar. The HUD overlay with the same
+    facts sits at the bottom of the window, which a short screen cuts off."""
+    return f"{run_dir.resolve().name}  |  {label}  |  episode {episode}"
+
+
 def main(argv=None) -> None:
     p = argparse.ArgumentParser(description="Watch a training run's newest checkpoint drive.")
     p.add_argument("--run", default=None, help="run directory; default: newest under --runs-root")
@@ -83,6 +89,7 @@ def main(argv=None) -> None:
         raise SystemExit(f"no training run found under {args.runs_root}/ - start one first")
     config = args.config or json.loads((run_dir / "train_config.json").read_text())["env_config"]
 
+    import pygame
     import torch
 
     torch.set_num_threads(1)  # stay off the cores the training workers are using
@@ -117,12 +124,16 @@ def main(argv=None) -> None:
             seed = WATCH_SEED_BASE + episode
             obs, _ = env.reset(seed=seed)
             env.hud_overlay = [f"policy  {label}", f"episode {episode}   seed {seed}"]
+            title = window_title(run_dir, label, episode)
             total, info = 0.0, {}
             while True:
                 action, _ = policy.predict(obs, deterministic=not args.stochastic)
                 obs, reward, terminated, truncated, info = env.step(action)
                 total += float(reward)
                 env.render()
+                if title:  # the window only exists once the first frame is drawn
+                    pygame.display.set_caption(title)
+                    title = None
                 if terminated or truncated:
                     break
 
