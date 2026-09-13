@@ -1,9 +1,11 @@
-# Phase 1 plus a charge for driving over ground already covered (phase1_v3b).
+# env_phase1.yaml with smoothness charged on both actuators: w_oscillation 0.05 -> 0.15 and
+# w_throttle_oscillation 0 -> 0.15. Nothing else differs.
 #
-# Identical to env_phase1.yaml except reward.w_retrace, which a test pins. Under
-# env_phase1.yaml every lap of a loop after the first is free, and phase1_v2 learned to
-# circle open patches; see the docstring in envs/rewards.py.
-#
+# By 5M steps phase1_mem_v2 flipped its steering between full left and right 4.6 times a
+# second, and the sign of its throttle 4.5 times a second, to hold ~0.7 m/s. Only the
+# servo slew limit and motor lag in the sim smoothed it over. A full flip now costs 0.3,
+# so flipping either actuator that often costs about twice the new ground it earned.
+
 # Phase 1: drive forward, do not crash, never stay stuck. No waypoints.
 #
 # Angles are written in degrees here and converted on load.
@@ -55,10 +57,10 @@ obs:
 reward:
   # Why new ground rather than speed or displacement: see the docstring in envs/rewards.py.
   w_explore: 1.0        # per metre of new ground
-  w_retrace: 0.5        # per metre over ground already covered; the one change from env_phase1
+  w_retrace: 0.0        # per metre over ground already covered; env_phase1_retrace.yaml sets it
   w_reverse: 0.02
-  w_oscillation: 0.05
-  w_throttle_oscillation: 0.0
+  w_oscillation: 0.15
+  w_throttle_oscillation: 0.15
   w_lateral: 0.05
   w_proximity: 0.05
   w_stall: 0.5
