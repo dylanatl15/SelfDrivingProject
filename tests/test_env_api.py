@@ -59,7 +59,7 @@ def test_step_info_carries_reward_terms():
     _, _, _, _, info = e.step(np.array([0.0, 1.0], np.float32))
     assert set(info["reward_terms"]) == {
         "explore", "retrace", "progress", "goal", "reverse", "oscillation", "lateral",
-        "proximity", "stall", "collision",
+        "proximity", "stall", "brake", "collision",
     }
 
 

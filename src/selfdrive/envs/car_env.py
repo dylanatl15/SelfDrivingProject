@@ -31,6 +31,7 @@ from ..sensors.depth_arc import DepthArc, DepthArcParams
 from ..sensors.odometry import Odometry, OdometryParams
 from ..sensors.ultrasonic import UltrasonicArray, UltrasonicParams
 from ..world.generators import ArenaParams, make_arena, sample_spawn
+from .braking import brake_shortfall
 from .goals import GoalConfig, GoalTracker
 from .memory import EgoMemory
 from .obs import ObsConfig, ObservationBuilder
@@ -320,6 +321,14 @@ class CarEnv(gym.Env):
 
         collided = self.world.collides(state.x, state.y, state.theta, p.length, p.width)
         clearance = self.world.clearance(state.x, state.y, state.theta, p.length, p.width)
+        shortfall = 0.0
+        rc = self.cfg.reward
+        if rc.w_brake > 0.0 and not collided:
+            # Reacting takes the depth frame's latency plus the control period it lands in.
+            shortfall = brake_shortfall(
+                self.world, state.x, state.y, state.theta, state.speed, state.steer, p,
+                reaction_s=(self.depth.p.latency_steps + 1) * self.dt,
+                margin=rc.brake_margin, samples=rc.brake_samples, clearance=clearance)
         if self.odometry is not None:
             lost = self.odometry.update(state.x, state.y, state.theta, self.dt, self._odometry_rng)
             if lost and self.memory is not None:
@@ -345,6 +354,7 @@ class CarEnv(gym.Env):
             dt=self.dt,
             progress_m=progress,
             reached=reached,
+            brake_shortfall=shortfall,
         )
 
         self._last_action = action

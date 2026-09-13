@@ -52,6 +52,12 @@ either found here or reliably finds elsewhere.
     cheaper than the alternative: reversing costs `w_reverse` per step, staying wedged
     costs `w_stall`, twenty-five times as much.
 
+*   Driving faster than the car can stop **costs**, through `w_brake` (`envs/braking.py`).
+    The proximity barrier charges distance whatever the speed, so it cannot tell parking
+    beside a wall from arriving at one. This charges the share of the stopping distance,
+    laid along the current arc, that the body cannot drive, so slowing down where it matters
+    is the cure, not staying away from everything.
+
 *   With a goal (`obs.goal_block`), the drive signal can be **progress** instead:
     `w_progress` per metre of path distance closed toward the goal, plus `goal_bonus` on
     arrival. Path distance goes around walls (`world/navigation.py`), so no dead end facing
@@ -89,6 +95,7 @@ class RewardConfig:
     w_lateral: float = 0.05  # per step at lateral_accel_ref; quadratic
     w_proximity: float = 0.05  # per step at zero clearance
     w_stall: float = 0.50  # per step while wedged
+    w_brake: float = 0.0  # per step with the whole stopping path blocked; quadratic; 0 = off
     collision_penalty: float = 100.0
 
     explore_radius: float = 0.25  # metres; the swath the car claims as it drives
@@ -99,6 +106,8 @@ class RewardConfig:
     stall_window: int = 45  # steps (~1.5 s) used for the stall check
     stall_eps: float = 0.08  # metres of net travel required within that window
     stall_limit: int = 90  # consecutive stalled steps before the episode is truncated
+    brake_margin: float = 0.05  # metres of clear floor wanted past the stopping point
+    brake_samples: int = 4  # poses checked along the stopping arc
 
 
 @dataclass
@@ -112,6 +121,7 @@ class RewardTerms:
     lateral: float = 0.0
     proximity: float = 0.0
     stall: float = 0.0
+    brake: float = 0.0
     collision: float = 0.0
 
     @property
@@ -126,6 +136,7 @@ class RewardTerms:
             + self.lateral
             + self.proximity
             + self.stall
+            + self.brake
             + self.collision
         )
 
@@ -273,9 +284,12 @@ class RewardFunction:
         dt: float,
         progress_m: float = 0.0,
         reached: bool = False,
+        brake_shortfall: float = 0.0,
     ) -> tuple[float, RewardTerms]:
         """`progress_m` and `reached` come from the environment's goal tracker, which owns
-        the path-distance field; both stay 0 without a goal."""
+        the path-distance field; both stay 0 without a goal. `brake_shortfall` is the share
+        of the stopping path that is blocked (`envs/braking.py`); the environment computes
+        it only when `w_brake` is on."""
         c = self.c
         x, y, theta = float(x), float(y), float(theta)
         x_prev, y_prev = self._history[-1]
@@ -316,6 +330,10 @@ class RewardFunction:
         if math.isfinite(clearance) and clearance < c.safe_distance:
             deficit = min(max(1.0 - clearance / c.safe_distance, 0.0), 1.0)
             t.proximity = -c.w_proximity * deficit**2
+
+        # Closing speed, not distance: the part of the stopping path, on the current arc,
+        # that the body cannot drive. Ground truth, like the barrier above.
+        t.brake = -c.w_brake * float(brake_shortfall) ** 2
 
         # Stall: judged on displacement, never on `speed == 0`, which a float never hits
         # and which would miss a wedged car whose wheels are still turning.
