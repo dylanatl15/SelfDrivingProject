@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 
 CHECKPOINT_RE = re.compile(r"_(\d+)_steps\.zip$")
-FINAL = sys.maxsize  # final_model.zip outranks every numbered checkpoint
+FINAL = sys.maxsize  # a current final_model.zip outranks every numbered checkpoint
 WATCH_SEED_BASE = 2_000_000
 SETTLE_S = 2.0  # ignore files modified more recently than this; the trainer may be mid-write
 
@@ -43,6 +43,10 @@ def newest_checkpoint(run_dir: Path, now: float | None = None) -> tuple[int, Pat
 
     Ranked by the step count in the filename, not by name or mtime: `ppo_10000000_steps`
     sorts before `ppo_2000000_steps` as a string.
+
+    final_model.zip wins only if no checkpoint is newer. A run that was stopped and
+    resumed keeps its old final model until it finishes again, and phase1_v5's viewer sat
+    on the 1M one for three million steps.
     """
     now = time.time() if now is None else now
     found: list[tuple[int, Path]] = []
@@ -50,12 +54,14 @@ def newest_checkpoint(run_dir: Path, now: float | None = None) -> tuple[int, Pat
         match = CHECKPOINT_RE.search(path.name)
         if match:
             found.append((int(match.group(1)), path))
-    final = run_dir / "final_model.zip"
-    if final.is_file():
-        found.append((FINAL, final))
 
     settled = [(steps, p) for steps, p in found if now - p.stat().st_mtime >= SETTLE_S]
-    return max(settled, key=lambda item: item[0], default=None)
+    best = max(settled, key=lambda item: item[0], default=None)
+    final = run_dir / "final_model.zip"
+    if final.is_file() and now - final.stat().st_mtime >= SETTLE_S:
+        if best is None or final.stat().st_mtime >= best[1].stat().st_mtime:
+            return FINAL, final
+    return best
 
 
 def describe_checkpoint(steps: int) -> str:
