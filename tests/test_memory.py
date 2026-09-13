@@ -415,3 +415,12 @@ def test_memory_light_big_config_is_the_memory_config_with_light_big_reward_and_
         assert ours.pop(key) == light_big[key]
         mem.pop(key)
     assert ours == mem
+
+
+def test_memory_light_config_is_the_memory_config_with_light_reward():
+    mem = load_yaml("configs/env_phase1_memory.yaml")
+    ours = load_yaml("configs/env_phase1_memory_light.yaml")
+    light = load_yaml("configs/env_phase1_light.yaml")
+    assert ours.pop("reward") == light["reward"]
+    mem.pop("reward")
+    assert ours == mem
