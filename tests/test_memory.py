@@ -405,3 +405,13 @@ def test_memory_smooth_config_is_the_memory_config_with_only_oscillation_weights
         assert mem["reward"].pop(key) == before
         assert smooth["reward"].pop(key) == after
     assert smooth == mem
+
+
+def test_memory_light_big_config_is_the_memory_config_with_light_big_reward_and_arena():
+    mem = load_yaml("configs/env_phase1_memory.yaml")
+    ours = load_yaml("configs/env_phase1_memory_light_big.yaml")
+    light_big = load_yaml("configs/env_phase1_light_big.yaml")
+    for key in ("reward", "arena"):
+        assert ours.pop(key) == light_big[key]
+        mem.pop(key)
+    assert ours == mem
