@@ -31,6 +31,15 @@ either found here or reliably finds elsewhere.
     reactive habit that keeps finding new ground: hold a line, take the open side, do not
     retrace.
 
+*   Driving over ground already covered can **cost**, per metre, through `w_retrace`.
+    Paying only for new ground makes a second lap free rather than unprofitable, and
+    `phase1_v2` settled for free. A 69° camera with no memory sees what is around it by
+    turning, and one collision costs as much as a hundred metres of new ground, so from
+    about 1M steps it drove at near-full steering lock for 62-76 % of its evaluation
+    steps, circling open patches slowly. The charge is counted on the same raster pixels
+    as the pay: a disk sliding over covered ground is charged exactly what it earned the
+    first time across, and driving onto new ground is never charged.
+
 *   **Lateral acceleration** costs, quadratically. The kinematic bicycle model has no
     tires and will corner a toy car at 0.4 g; the real car slides or tips over, so a
     policy that depends on fast full-lock turns does not transfer. The same term makes
@@ -58,10 +67,14 @@ import numpy as np
 
 from ..dynamics.base import wrap_angle
 
+# How many of the latest stamps still count as the disk's own footprint; see `_stamp`.
+RECENT_STAMPS = 4  # 3 still charged 4 % of a diagonal line on new ground; 4 charges none
+
 
 @dataclass
 class RewardConfig:
     w_explore: float = 1.0  # per metre of fresh ground
+    w_retrace: float = 0.0  # per metre of ground covered again within revisit_s; 0 = off
     w_reverse: float = 0.02  # per step at full reverse
     w_oscillation: float = 0.05  # per unit change in the steering command
     w_lateral: float = 0.05  # per step at lateral_accel_ref; quadratic
@@ -82,6 +95,7 @@ class RewardConfig:
 @dataclass
 class RewardTerms:
     explore: float = 0.0
+    retrace: float = 0.0
     reverse: float = 0.0
     oscillation: float = 0.0
     lateral: float = 0.0
@@ -93,6 +107,7 @@ class RewardTerms:
     def total(self) -> float:
         return (
             self.explore
+            + self.retrace
             + self.reverse
             + self.oscillation
             + self.lateral
@@ -130,6 +145,9 @@ class RewardFunction:
         self._origin = (0.0, 0.0)
         self._pixel: tuple[int, int] | None = None
         self._painted = 0
+        self._fresh_px = 0  # swept onto fresh ground by steps, not counting the spawn stamp
+        self._retraced_px = 0  # swept over ground covered within revisit_s
+        self._recent: deque[np.float32] = deque(maxlen=RECENT_STAMPS)
         self._clock = 0.0
         self._heading = 0.0
         self.stalled_steps = 0
@@ -147,6 +165,9 @@ class RewardFunction:
         self._disk_flat = self._disk_dx * h + self._disk_dy
         self._pixel = None
         self._painted = 0
+        self._fresh_px = 0
+        self._retraced_px = 0
+        self._recent.clear()
         self._clock = 0.0
         self._heading = float(theta)
         self._history.clear()
@@ -154,8 +175,9 @@ class RewardFunction:
         self.stalled_steps = 0
         self._stamp(x, y)  # the spawn footprint is not new ground
 
-    def _stamp(self, x: float, y: float) -> int:
-        """Mark the disk at (x, y) as seen now; return how many of its pixels were fresh."""
+    def _stamp(self, x: float, y: float) -> tuple[int, int]:
+        """Mark the disk at (x, y) as seen now. Return how many pixels the move swept onto
+        fresh ground, and how many it swept over ground covered within `revisit_s`."""
         c = self.c
         n = self._disk_n
         w, h = self._shape
@@ -166,7 +188,7 @@ class RewardFunction:
         if (px, py) == self._pixel:
             # Every pixel under the disk was stamped a step or more ago. Their timestamps
             # go stale while parked, which could only matter after revisit_s of stalling.
-            return 0
+            return 0, 0
         self._pixel = (px, py)
 
         idx = self._disk_flat + (px * h + py)
@@ -177,8 +199,15 @@ class RewardFunction:
             fresh = never  # nothing stamped this episode can have expired yet
         else:
             fresh = int(np.count_nonzero(last <= self._clock - c.revisit_s))
-        self._seen[idx] = self._clock
-        return fresh
+        # Swept by this move: every pixel under the disk that none of the latest stamps
+        # covered. The previous stamp alone is not enough, because a disk moving diagonally
+        # steps in a staircase and re-enters a few rim pixels of the stamp before it.
+        # Whatever was swept and is not fresh is ground covered again.
+        swept = int(np.count_nonzero(last < self._recent[0])) if self._recent else fresh
+        now = np.float32(self._clock)
+        self._seen[idx] = now
+        self._recent.append(now)
+        return fresh, max(swept - fresh, 0)
 
     @property
     def coverage_m2(self) -> float:
@@ -187,6 +216,13 @@ class RewardFunction:
         Metres of swath times the true swath width, not pixel count times pixel area: a
         rasterized disk is 2n+1 pixels across, ~10 % wider than the disk it stands for."""
         return self._painted * self._metres_per_pixel * 2.0 * self.c.explore_radius
+
+    @property
+    def retrace_frac(self) -> float:
+        """Share of the swath driven this episode that went over ground already covered:
+        zero for a car that never crosses its own track, a half after two laps of a loop."""
+        swept = self._fresh_px + self._retraced_px
+        return self._retraced_px / swept if swept else 0.0
 
     def coverage_raster(self) -> tuple[np.ndarray, tuple[float, float], float]:
         """For the viewport; nothing in training reads it.
@@ -230,7 +266,11 @@ class RewardFunction:
         self._clock += dt
         t = RewardTerms()
 
-        t.explore = c.w_explore * self._stamp(x, y) * self._metres_per_pixel
+        fresh, retraced = self._stamp(x, y)
+        self._fresh_px += fresh
+        self._retraced_px += retraced
+        t.explore = c.w_explore * fresh * self._metres_per_pixel
+        t.retrace = -c.w_retrace * retraced * self._metres_per_pixel
 
         # Reversing is allowed and sometimes necessary, but it is never free.
         t.reverse = -c.w_reverse * max(0.0, -float(throttle_cmd))

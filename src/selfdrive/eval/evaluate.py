@@ -3,6 +3,10 @@
 Phase 1 has exactly two failure modes and they need separate numbers. A policy that
 crawls into a corner and parks has a perfect collision rate, and a policy that sprints
 into walls never gets stuck. `success_rate` counts only episodes that did neither.
+
+Neither failure catches a policy that circles an open patch for the whole episode, which
+never crashes and never sticks: `phase1_v2` scored 90 % that way at 11M steps.
+`clean_coverage_m2` does, because it counts only floor covered in episodes that did not fail.
 """
 
 from __future__ import annotations
@@ -44,9 +48,12 @@ class EvalResult:
     mean_return: float = 0.0
     mean_distance_m: float = 0.0
     mean_coverage_m2: float = 0.0  # path length can be inflated by circling; this cannot
+    clean_coverage_m2: float = 0.0  # the same, counting crashed and stuck episodes as zero
     mean_speed_mps: float = 0.0
     mean_min_clearance_m: float = 0.0
     mean_reverse_frac: float = 0.0
+    mean_retrace_frac: float = 0.0  # share of the swath driven over ground already covered
+    mean_lock_frac: float = 0.0  # share of steps driving forward at near-full steering lock
     mean_steps: float = 0.0
 
     def as_dict(self) -> dict[str, float]:
@@ -57,8 +64,9 @@ class EvalResult:
             f"episodes {self.episodes:4d}  success {self.success_rate:6.1%}  "
             f"collision {self.collision_rate:6.1%}  stuck {self.stuck_rate:6.1%}  "
             f"dist {self.mean_distance_m:6.2f} m  cover {self.mean_coverage_m2:6.1f} m2  "
-            f"speed {self.mean_speed_mps:5.2f} m/s  "
-            f"reverse {self.mean_reverse_frac:5.1%}"
+            f"clean {self.clean_coverage_m2:5.1f} m2  speed {self.mean_speed_mps:5.2f} m/s  "
+            f"reverse {self.mean_reverse_frac:5.1%}  retrace {self.mean_retrace_frac:5.1%}  "
+            f"lock {self.mean_lock_frac:5.1%}"
         )
 
 
@@ -105,18 +113,23 @@ def run_episodes(
 
     collided = np.array([r.get("collided", 0.0) for r in rows])
     stuck = np.array([r.get("stuck", 0.0) for r in rows])
+    clean = (collided == 0.0) & (stuck == 0.0)
+    coverage = np.array([r.get("coverage_m2", 0.0) for r in rows])
 
     return EvalResult(
         episodes=len(rows),
-        success_rate=float(np.mean((collided == 0.0) & (stuck == 0.0))),
+        success_rate=float(np.mean(clean)),
         collision_rate=float(np.mean(collided)),
         stuck_rate=float(np.mean(stuck)),
         mean_return=float(np.mean(returns)),
         mean_distance_m=mean("distance_m"),
         mean_coverage_m2=mean("coverage_m2"),
+        clean_coverage_m2=float(np.mean(np.where(clean, coverage, 0.0))),
         mean_speed_mps=mean("mean_speed_mps"),
         mean_min_clearance_m=mean("min_clearance_m"),
         mean_reverse_frac=mean("reverse_frac"),
+        mean_retrace_frac=mean("retrace_frac"),
+        mean_lock_frac=mean("lock_frac"),
         mean_steps=mean("steps"),
     )
 

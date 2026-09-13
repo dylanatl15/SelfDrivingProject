@@ -58,7 +58,8 @@ def test_step_info_carries_reward_terms():
     e.reset(seed=0)
     _, _, _, _, info = e.step(np.array([0.0, 1.0], np.float32))
     assert set(info["reward_terms"]) == {
-        "explore", "reverse", "oscillation", "lateral", "proximity", "stall", "collision"
+        "explore", "retrace", "reverse", "oscillation", "lateral", "proximity", "stall",
+        "collision",
     }
 
 
@@ -85,6 +86,18 @@ def test_episode_metrics_separate_crashing_from_getting_stuck():
     m = info["episode_metrics"]
     assert {"collided", "stuck"} <= set(m)
     assert not (m["collided"] and m["stuck"])  # they are distinct outcomes
+
+
+def test_episode_metrics_report_steering_lock_and_retrace():
+    e = env(max_steps=60)
+    e.reset(seed=0)
+    for _ in range(60):
+        _, _, terminated, truncated, info = e.step(np.array([1.0, 1.0], np.float32))
+        if terminated or truncated:
+            break
+    m = info["episode_metrics"]
+    assert m["lock_frac"] == 1.0
+    assert 0.0 <= m["retrace_frac"] <= 1.0
 
 
 def test_truncates_at_max_steps():

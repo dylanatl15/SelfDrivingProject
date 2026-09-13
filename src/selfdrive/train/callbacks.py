@@ -14,6 +14,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 
 from ..config import load_env_config
@@ -55,21 +56,35 @@ class EpisodeCsvLogger(BaseCallback):
 
     FIELDS = [
         "timesteps", "wall_s", "distance_m", "coverage_m2", "mean_speed_mps", "min_clearance_m",
-        "stall_frac", "reverse_frac", "collided", "stuck", "steps",
+        "stall_frac", "reverse_frac", "lock_frac", "retrace_frac", "collided", "stuck", "steps",
     ]
 
-    def __init__(self, path: str | Path, verbose: int = 0):
+    def __init__(self, path: str | Path, start_timesteps: int = 0, verbose: int = 0):
         super().__init__(verbose)
         self.path = Path(path)
+        self.start_timesteps = start_timesteps
         self._start = time.time()
         self._fh = None
         self._writer = None
 
+    def rows_to_keep(self) -> list[dict]:
+        """On a resume, the rows logged up to the checkpoint. Anything later came from the
+        stretch of training that was lost, which is about to be run again."""
+        if not self.start_timesteps or not self.path.exists():
+            return []
+        with open(self.path, newline="") as fh:
+            return [row for row in csv.DictReader(fh)
+                    if int(row["timesteps"]) <= self.start_timesteps]
+
     def _on_training_start(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        kept = self.rows_to_keep()  # read in full before the file is reopened for writing
         self._fh = open(self.path, "w", newline="")
-        self._writer = csv.DictWriter(self._fh, fieldnames=self.FIELDS)
+        self._writer = csv.DictWriter(self._fh, fieldnames=self.FIELDS, extrasaction="ignore")
         self._writer.writeheader()
+        self._writer.writerows(kept)
+        if kept:
+            self._start = time.time() - float(kept[-1]["wall_s"] or 0.0)
 
     def _on_step(self) -> bool:
         for info in self.locals.get("infos", []):
@@ -97,6 +112,10 @@ class PeriodicEval(BaseCallback):
 
     Evaluation seeds start at 1_000_000 so they can never collide with training seeds -
     otherwise the scorecard silently reports training-set performance.
+
+    The best model is the one with the most `clean_coverage_m2`: floor covered in episodes
+    that neither crashed nor got stuck. Keeping it by success rate crowned `phase1_v2` at
+    11M steps, which circled open patches and so never failed.
     """
 
     EVAL_SEED_BASE = 1_000_000
@@ -110,6 +129,7 @@ class PeriodicEval(BaseCallback):
         video_episodes: int = 2,
         video_dir: str | Path = "videos",
         best_model_path: str | Path | None = None,
+        start_steps: int = 0,
         verbose: int = 1,
     ):
         super().__init__(verbose)
@@ -120,10 +140,30 @@ class PeriodicEval(BaseCallback):
         self.video_episodes = video_episodes
         self.video_dir = Path(video_dir)
         self.best_model_path = Path(best_model_path) if best_model_path else None
-        self._next_eval = every_steps
-        self._next_video = video_every_steps if video_every_steps else None
+        self.start_steps = start_steps
+        # The next multiple after where training starts, so a resumed run neither repeats
+        # an evaluation it already logged nor fires one per step until it catches up.
+        self._next_eval = (start_steps // every_steps + 1) * every_steps
+        self._next_video = ((start_steps // video_every_steps + 1) * video_every_steps
+                            if video_every_steps else None)
         self._best = -np.inf
         self._env = None
+
+    def _on_training_start(self) -> None:
+        # A resumed run must not replace its best model with whatever it evaluates first,
+        # so the saved one is scored again on the same seeds. Evaluation is deterministic,
+        # so this reproduces the score that earned it the file.
+        best = self.best_model_path.with_suffix(".zip") if self.best_model_path else None
+        if not (self.start_steps and best is not None and best.exists()):
+            return
+        result = run_episodes(
+            PPO.load(best, device="cpu"), self._get_env(render=False), self.n_episodes,
+            seed=self.EVAL_SEED_BASE, deterministic=True,
+        )
+        self._best = result.clean_coverage_m2
+        if self.verbose:
+            print(f"[eval] resuming; the saved best model covers "
+                  f"{result.clean_coverage_m2:.1f} m2 clean")
 
     def _get_env(self, render: bool):
         # One env for scoring, rebuilt when pixels are needed. Never a training worker.
@@ -148,9 +188,10 @@ class PeriodicEval(BaseCallback):
         if self.verbose:
             print(f"[eval @ {self.num_timesteps:>10,}] {result}")
 
-        # Success rate, not return: return is normalized and drifts with VecNormalize.
-        if self.best_model_path and result.success_rate > self._best:
-            self._best = result.success_rate
+        # Clean coverage, not success rate (see the class docstring) and not return,
+        # which is normalized and drifts with VecNormalize.
+        if self.best_model_path and result.clean_coverage_m2 > self._best:
+            self._best = result.clean_coverage_m2
             self.best_model_path.parent.mkdir(parents=True, exist_ok=True)
             self.model.save(self.best_model_path)
 
