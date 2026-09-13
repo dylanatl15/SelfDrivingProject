@@ -1,0 +1,87 @@
+# env_phase1.yaml with throttle changes charged like steering changes: w_throttle_oscillation
+# 0 -> 0.05, the weight w_oscillation already has. Nothing else differs.
+#
+# phase1_mem_v2 pumped its throttle 4.5 times a second with nothing charging it.
+# env_phase1_smooth.yaml's 0.15 on both actuators was too much: charged on every change the
+# gSDE noise made as well, it cost more than exploring paid, and phase1_v6 and phase1_v6r
+# pinned both actuators at a limit, where tanh hides the noise, and orbited.
+
+# Phase 1: drive forward, do not crash, never stay stuck. No waypoints.
+#
+# Angles are written in degrees here and converted on load.
+# Distances are metres, times are seconds, speeds are metres per second.
+
+dt: 0.0333          # 30 Hz nominal; domain randomization jitters this per episode
+max_steps: 1500     # ~50 s of driving
+
+car:
+  # Placeholders for a generic ~1/10 scale RC platform big enough to carry a phone,
+  # an ESP32 and a 2S LiPo. Replace with measured values once the chassis exists -
+  # see docs/sim2real.md for what to measure and how.
+  wheelbase: 0.25
+  length: 0.40
+  width: 0.20
+  max_steer_deg: 28.0
+  steer_rate_deg_s: 200.0
+  max_speed_fwd: 1.5
+  max_speed_rev: 0.6
+  accel_tau: 0.25
+
+depth:
+  # 69 deg is the Galaxy S21 FE main lens (26 mm equivalent) held in LANDSCAPE.
+  # Portrait is only ~50 deg. ARCore does not support the ultra-wide lens, so the
+  # 123 deg figure from the phone's spec sheet is not reachable through ARCore.
+  fov_deg: 69.0
+  n_buckets: 8
+  rays_per_bucket: 5
+  max_range: 5.0
+  mount_forward: 0.18
+
+ultrasonic:
+  n_sensors: 4          # front, left, right, back; set 3 to drop the front
+  cone_deg: 15.0
+  max_range: 4.0
+  update_hz: 20.0       # total across the round-robin, not per sensor
+
+obs:
+  n_depth: 8
+  n_ultrasonic: 4
+  frame_stack: 4
+  # Fixed normalization references. These are a published interface shared with the
+  # Android app - changing one invalidates every trained checkpoint.
+  norm_depth_max: 5.0
+  norm_ultra_max: 4.0
+  norm_speed_max: 1.5
+  norm_steer_max: 0.4887
+
+reward:
+  # Why new ground rather than speed or displacement: see the docstring in envs/rewards.py.
+  w_explore: 1.0        # per metre of new ground
+  w_retrace: 0.0        # per metre over ground already covered; env_phase1_retrace.yaml sets it
+  w_reverse: 0.02
+  w_oscillation: 0.05
+  w_throttle_oscillation: 0.05
+  w_lateral: 0.05
+  w_proximity: 0.05
+  w_stall: 0.5
+  collision_penalty: 100.0
+  explore_radius: 0.25
+  explore_res: 0.05
+  revisit_s: 60.0       # longer than an episode, so a loop of any size pays for one lap
+  lateral_accel_ref: 3.0
+  safe_distance: 0.6
+  stall_window: 45
+  stall_eps: 0.08
+  stall_limit: 90
+
+arena:
+  kind: random          # indoor | outdoor | mixed | random
+  size_min: 8.0
+  size_max: 18.0
+  interior_walls: [3, 10]
+  doorway_prob: 0.55
+  cone_density: [0.02, 0.10]
+  spawn_clearance: 0.5
+
+domain_rand:
+  enabled: true

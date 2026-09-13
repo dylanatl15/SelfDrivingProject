@@ -26,6 +26,12 @@ class ArenaParams:
     size_max: float = 18.0
     interior_walls: tuple[int, int] = (3, 10)
     wall_frac: tuple[float, float] = (0.25, 0.60)  # wall length as a fraction of arena size
+    # Density-based layout, off by default. A wall count and a length that is a fraction of the
+    # arena size thin out as the arena grows: doubling the size halves the wall length per m2.
+    # With these set, the count scales with floor area and the length is in metres, so a
+    # bigger arena gets more walls of the same size.
+    walls_per_100m2: tuple[float, float] | None = None
+    wall_length_m: tuple[float, float] | None = None
     doorway_prob: float = 0.55
     doorway_width: tuple[float, float] = (0.70, 1.20)
     cone_density: tuple[float, float] = (0.02, 0.10)  # cones per square metre
@@ -70,11 +76,18 @@ def _interior_walls(
 ) -> list[list[float]]:
     size = min(x1 - x0, y1 - y0)
     margin = 1.0
-    n = int(rng.integers(p.interior_walls[0], p.interior_walls[1] + 1))
+    if p.walls_per_100m2 is not None:
+        area = (x1 - x0) * (y1 - y0)
+        n = int(round(rng.uniform(*p.walls_per_100m2) * area / 100.0))
+    else:
+        n = int(rng.integers(p.interior_walls[0], p.interior_walls[1] + 1))
     walls: list[list[float]] = []
 
     for _ in range(n):
-        length = rng.uniform(*p.wall_frac) * size
+        if p.wall_length_m is not None:
+            length = rng.uniform(*p.wall_length_m)
+        else:
+            length = rng.uniform(*p.wall_frac) * size
         horizontal = rng.random() < 0.5
         if horizontal:
             length = min(length, (x1 - x0) - 2 * margin)
