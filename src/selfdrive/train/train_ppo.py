@@ -49,6 +49,12 @@ DEFAULTS: dict = {
     "vf_coef": 0.5,
     "max_grad_norm": 0.5,
     "target_kl": None,
+    # Squashed gSDE bounds every sampled action with tanh. Gaussian actions clipped to
+    # [-1, 1] make extra std free, and phase1_v3's entropy bonus ran it past 3.
+    "use_sde": False,
+    "sde_sample_freq": -1,
+    "squash_output": False,
+    "log_std_init": 0.0,
     "normalize_reward": True,
     "eval_every_steps": 500_000,
     "eval_episodes": 20,
@@ -111,6 +117,8 @@ def start_run(args: argparse.Namespace):
     ring = f" + {2 * env_cfg.obs.memory_sectors} memory" if env_cfg.obs.memory_sectors else ""
     print(f"observation  {env_cfg.obs.size} floats "
           f"({env_cfg.obs.per_frame} per frame x {env_cfg.obs.frame_stack}{ring})")
+    squashed = " squashed" if cfg["squash_output"] else ""
+    print(f"actions      {f'gSDE{squashed}' if cfg['use_sde'] else 'Gaussian, clipped by the env'}")
     print(f"budget       {cfg['total_timesteps']:,} steps")
 
     venv = make_vec_env(
@@ -121,7 +129,13 @@ def start_run(args: argparse.Namespace):
     model = PPO(
         cfg["policy"],
         venv,
-        policy_kwargs={"net_arch": list(cfg["net_arch"])},
+        policy_kwargs={
+            "net_arch": list(cfg["net_arch"]),
+            "squash_output": cfg["squash_output"],
+            "log_std_init": cfg["log_std_init"],
+        },
+        use_sde=cfg["use_sde"],
+        sde_sample_freq=cfg["sde_sample_freq"],
         n_steps=cfg["n_steps"],
         batch_size=cfg["batch_size"],
         n_epochs=cfg["n_epochs"],

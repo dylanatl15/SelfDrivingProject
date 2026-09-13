@@ -43,9 +43,16 @@ breaks one of those, the tweak is wrong, not the test.
 `phase1_v2` found the next hole. Paying only for new ground makes every lap after the
 first free, and a collision costs as much as 100 m of new ground, so it circled open
 patches at near-full steering lock. `w_retrace` charges for ground covered again: it is 0
-in `env_phase1.yaml` and 0.5 in `env_phase1_retrace.yaml` until `phase1_v3a` and
-`phase1_v3b` show whether it is needed. Best models are kept by `clean_coverage_m2`, not
-success rate, because a car that circles never fails.
+in `env_phase1.yaml` and 0.5 in `env_phase1_retrace.yaml`. `phase1_v3b` did not show that
+it helps, so it stays off. Best models are kept by `clean_coverage_m2`, not success rate,
+because a car that circles never fails.
+
+`phase1_v3a` and `phase1_v3b` circled again for a different reason: the action
+distribution. The env clips Gaussian actions to [-1, 1], so extra std costs nothing.
+`ent_coef` 0.004 let v2's std collapse to 0.06; 0.01 ran v3's past 3, with the steering
+mean near |5|, and both ended at full lock. `train_ppo_v4.yaml` bounds actions with tanh
+(squashed gSDE) instead. On a clipped-Gaussian run, watch `train/std` and the raw policy
+mean. Under gSDE, `train/std` is the noise-matrix scale, not the action std.
 
 ## Throughput ceiling - do not chase it
 
