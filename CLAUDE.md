@@ -64,6 +64,20 @@ backwards. mem_v2 held ~0.7 m/s by flipping the sign of its throttle 4.5 times a
 and its steering between full locks as often. `env_phase1_smooth.yaml` charges changes on
 both actuators (`w_throttle_oscillation`).
 
+That charge is also a charge on exploration. gSDE resampled its noise every 4 steps, so the
+commands changed on a quarter of all steps whatever the policy meant, and at 0.15 the
+charge cost more than exploring paid. `phase1_v6` and `phase1_v6r` hid from it by pinning
+both actuators at a limit, where tanh flattens the noise, and orbited at full lock; v6r did
+it in reverse. Keep smoothness weights small next to explore pay, and resample the noise
+rarely: `train_ppo_v6.yaml` uses `sde_sample_freq` 30, `env_phase1_light.yaml` 0.05 on
+each actuator. The eval `lock` column counts forward driving only, so it misses reverse
+orbits; check `backing`.
+
+`env_phase1_light_big.yaml` is the same reward in arenas of 3.4 times the floor area. Wall
+count scales with area there (`walls_per_100m2`) and wall length is absolute, so obstacle
+density matches `env_phase1.yaml`. A 32-seed sample said a sparser layout matched; the
+test uses 300.
+
 ## Throughput ceiling - do not chase it
 
 `python -m selfdrive.train.bench` reports ~900 steps/s single-process and ~4,800 across

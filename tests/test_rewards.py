@@ -437,7 +437,8 @@ def test_smooth_config_is_phase1_with_only_the_oscillation_weights_changed():
     assert smooth == base
 
 
-@pytest.mark.parametrize("config", ["env_phase1_smooth.yaml", "env_phase1_smooth_retrace.yaml"])
+@pytest.mark.parametrize("config", ["env_phase1_light.yaml", "env_phase1_smooth.yaml",
+                                    "env_phase1_smooth_retrace.yaml"])
 def test_smooth_reward_keeps_backing_out_of_a_trap_and_holding_the_throttle(config):
     """Charging throttle changes must not make sitting wedged cheaper than reversing, and
     pumping the throttle must still lose to holding it."""
@@ -457,3 +458,11 @@ def test_smooth_retrace_config_is_smooth_with_only_w_retrace_changed():
     assert smooth["reward"].pop("w_retrace") == 0.0
     assert retrace["reward"].pop("w_retrace") == RETRACE.w_retrace
     assert retrace == smooth
+
+
+def test_light_config_is_phase1_with_only_throttle_oscillation_changed():
+    base = yaml.safe_load((CONFIGS / "env_phase1.yaml").read_text())
+    light = yaml.safe_load((CONFIGS / "env_phase1_light.yaml").read_text())
+    assert base["reward"].pop("w_throttle_oscillation") == 0.0
+    assert light["reward"].pop("w_throttle_oscillation") == 0.05
+    assert light == base
