@@ -3,7 +3,7 @@
 import os
 import time
 
-from selfdrive.eval.watch import FINAL, SETTLE_S, newest_checkpoint, newest_run
+from selfdrive.eval.watch import FINAL, SETTLE_S, newest_checkpoint, newest_run, window_title
 
 
 def _touch(path, age_s):
@@ -54,3 +54,10 @@ def test_newest_run_uses_start_time(tmp_path):
     _touch(tmp_path / "ppo_a" / "train_config.json", age_s=10)
     (tmp_path / "not_a_run").mkdir()
     assert newest_run(tmp_path).name == "ppo_a"
+
+
+def test_window_title_names_the_run_first(tmp_path):
+    title = window_title(tmp_path / "phase1_mem_v6", "checkpoint 1.5M steps", 3)
+    assert title.startswith("phase1_mem_v6")
+    assert "checkpoint 1.5M steps" in title
+    assert title.endswith("episode 3")
