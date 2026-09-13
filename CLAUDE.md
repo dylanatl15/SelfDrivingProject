@@ -63,6 +63,11 @@ nothing, BLAS thread pinning changes nothing, and fork/forkserver/spawn agree wi
 Even a zero-cost env step would cap out near 5,700 steps/s. Optimizing geometry further
 buys almost nothing; the only real fix would be batching many steps per IPC round trip.
 
+That ceiling is per run. Trainers running side by side must pin torch threads
+(`torch_threads` in the training YAML, default 4). Unpinned, each parent's torch took most
+of the 28 threads for PPO updates and policy inference, starving the env workers, and
+three parallel runs fell to 853 steps/s in total. Pinned, the same three ran at 3,894.
+
 ## Known placeholders
 
 `configs/env_phase1.yaml` car geometry is a generic ~1/10 RC platform. Replace with

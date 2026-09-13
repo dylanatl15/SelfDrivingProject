@@ -22,6 +22,7 @@ import shutil
 import time
 from pathlib import Path
 
+import torch as th
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback
 from stable_baselines3.common.vec_env import VecNormalize
@@ -36,6 +37,9 @@ DEFAULTS: dict = {
     "total_timesteps": 20_000_000,
     "seed": 0,
     "device": "cpu",
+    # Unpinned, each trainer's torch took most of the 28 threads, and three runs side by
+    # side fell to 853 steps/s in total. Pinned to 4, the same three ran at 3,894.
+    "torch_threads": 4,
     "policy": "MlpPolicy",
     "net_arch": [256, 256],
     "n_steps": 512,
@@ -95,6 +99,7 @@ def resolve(args: argparse.Namespace) -> dict:
 
 def start_run(args: argparse.Namespace):
     cfg = resolve(args)
+    th.set_num_threads(cfg["torch_threads"])
 
     name = args.name or time.strftime("ppo_%Y%m%d_%H%M%S")
     run_dir = Path(cfg["run_dir"]) / name
@@ -113,7 +118,8 @@ def start_run(args: argparse.Namespace):
     (run_dir / "env_config.txt").write_text(describe(env_cfg))
 
     print(f"run dir      {run_dir}")
-    print(f"workers      {cfg['n_envs']}   device {cfg['device']}")
+    print(f"workers      {cfg['n_envs']}   device {cfg['device']}   "
+          f"torch threads {cfg['torch_threads']}")
     print(f"observation  {env_cfg.obs.size} floats "
           f"({env_cfg.obs.per_frame} per frame x {env_cfg.obs.frame_stack})")
     squashed = " squashed" if cfg["squash_output"] else ""
@@ -164,6 +170,7 @@ def resume_run(args: argparse.Namespace):
     cfg = {**DEFAULTS, **json.loads((run_dir / "train_config.json").read_text())}
     if args.total_timesteps is not None:
         cfg["total_timesteps"] = args.total_timesteps
+    th.set_num_threads(cfg["torch_threads"])
 
     seed = cfg["seed"] + steps  # new arenas, not the ones the run started on
     venv = make_vec_env(
