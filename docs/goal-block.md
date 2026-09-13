@@ -16,6 +16,9 @@ models take **119 floats**:
 The goal block is always last and is not frame-stacked. Each step carries only the
 current value.
 
+Models trained with `obs.goal_patience: true` take a fourth goal float, the patience clock,
+so **120 floats**, with the goal block at 116-119. See [The patience clock](#the-patience-clock).
+
 ## The three floats
 
 | Index | Value | Formula |
@@ -63,7 +66,30 @@ While tracking is lost, keep sending the last block you computed. When no goal i
 simulator sends `[1, 0, 1]`, a far goal dead ahead, so the car drives forward. The app
 should stop the car instead.
 
-## Arrival and what goals to give it
+## The patience clock
+
+Only for models trained with `obs.goal_patience: true`.
+
+| Index | Value | Formula |
+|---|---|---|
+| 119 | seconds waited | `clip(t / 10.0, 0, 1) * 2 - 1` |
+
+`t` is how long the car has gone without getting closer to the goal. It lets the model notice
+that it is shuffling in a dead end and try something else. Keep two numbers, `best` and `t`:
+
+1. **When a goal is set**, or the app advances to the next one: `best = r`, `t = 0`.
+2. **Every policy step after that**, with `r` computed as above and `dt` the seconds since
+   the previous policy step:
+   - if `r <= best - 0.25`, then `best = r` and `t = 0`;
+   - otherwise `t = t + dt`.
+
+- Going back and forth never restarts the clock. Only a new low range at least 0.25 m below
+  the previous one does. Backing away from the goal counts as waiting.
+- `10.0` (`norm_patience_max`) and `0.25` (`patience_gain`) are published constants, like
+  `15.0`.
+- The clock runs while tracking is lost; keep adding `dt` against the last `r` you computed.
+- The simulator computes `r` from the same drifting estimate as the rest of the block.
+
 
 - **Arrival.** Advance to the next waypoint, or stop, when the range you compute is at most
   **0.5 m**. The app can only judge arrival from its own pose. Models trained with

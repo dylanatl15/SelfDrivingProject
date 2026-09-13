@@ -30,9 +30,12 @@ With `goal_block` on, three floats follow everything else. They are not stacked 
     [1]       sine of the bearing to the goal, left-positive like steering
     [2]       cosine of that bearing
 
+    [3]       with `goal_patience`: seconds since that range last fell to a new low,
+              over `norm_patience_max`
+
 The bearing is split into sine and cosine because a single angle jumps from +pi to -pi as
-the goal passes behind the car. Both come from the pose estimate, not the true pose; the
-phone's rules are in `docs/goal-block.md`.
+the goal passes behind the car. All of it comes from the pose estimate, not the true pose;
+the phone's rules are in `docs/goal-block.md`, and the clock's in `envs/goals.py`.
 
 Two rules that exist for deployment rather than for training:
 
@@ -75,6 +78,10 @@ class ObsConfig:
     # Range and bearing to the current goal, appended last. Same published interface.
     goal_block: bool = False
     norm_goal_max: float = 15.00  # metres
+    # A fourth goal float: how long the car has gone without getting closer (GoalPatience).
+    goal_patience: bool = False
+    norm_patience_max: float = 10.0  # seconds
+    patience_gain: float = 0.25  # metres the range must fall below its best to restart the clock
 
     @property
     def per_frame(self) -> int:
@@ -82,7 +89,9 @@ class ObsConfig:
 
     @property
     def goal_size(self) -> int:
-        return 3 if self.goal_block else 0
+        if not self.goal_block:
+            return 0
+        return 4 if self.goal_patience else 3
 
     @property
     def size(self) -> int:
@@ -140,11 +149,17 @@ class ObservationBuilder:
         out[i + 3] = np.clip(last_steer, -1.0, 1.0)
         return out
 
-    def goal(self, range_m: float, bearing: float) -> np.ndarray:
-        """The goal block for a range in metres and a left-positive bearing in radians.
-        An infinite range (no goal) reads as the far end of the scale, dead ahead."""
-        return np.array([_unit_to_pm1(np.asarray(range_m, dtype=float), self.c.norm_goal_max),
-                         np.sin(bearing), np.cos(bearing)], dtype=np.float32)
+    def goal(self, range_m: float, bearing: float, waited_s: float | None = None) -> np.ndarray:
+        """The goal block for a range in metres, a left-positive bearing in radians and, with
+        `goal_patience`, the seconds waited for a new low range. An infinite range (no goal)
+        reads as the far end of the scale, dead ahead."""
+        block = [_unit_to_pm1(np.asarray(range_m, dtype=float), self.c.norm_goal_max),
+                 np.sin(bearing), np.cos(bearing)]
+        if self.c.goal_patience:
+            if waited_s is None:
+                raise ValueError("goal_patience needs the seconds waited")
+            block.append(_unit_to_pm1(np.asarray(waited_s, dtype=float), self.c.norm_patience_max))
+        return np.array(block, dtype=np.float32)
 
     def reset(self, first_frame: np.ndarray, ring: np.ndarray | None = None,
               goal: np.ndarray | None = None) -> np.ndarray:
