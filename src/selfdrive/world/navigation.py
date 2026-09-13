@@ -7,10 +7,11 @@ the shortest route around walls and through gaps. Like every reward input it is 
 truth; the policy only ever sees range and bearing from its drifting odometry.
 
 The floor is a raster of `res`-metre cells, built once per episode. A cell is blocked when
-its centre lies within `inflate` of an obstacle. Moves go to the 8 neighbours at cost 1 or
-sqrt(2) cells and never cut the corner of a blocked cell. `inflate` must be at least
-`res / sqrt(2)`: every cell a wall passes through is then blocked, so a wall at any angle
-is a solid barrier.
+its centre lies within `inflate` of an obstacle, or, once `restrict` has narrowed it, when
+the car cannot get there (`world/reachability.py`). Moves go to the 8 neighbours at cost 1
+or sqrt(2) cells and never cut the corner of a blocked cell. Every free centre must be at
+least `res / sqrt(2)` from any obstacle: every cell a wall passes through is then blocked,
+so a wall at any angle is a solid barrier.
 
 Octile distance reads up to 8 % long for a straight line 22.5 degrees off the grid axes,
 which scales the pay for some goals a little. It cannot be farmed: progress is the change
@@ -131,7 +132,14 @@ class NavGrid:
         self.cap = max(inflate, clearance_cap) + res
         self.room = self._clearance(world)
         self.blocked = self.room < inflate
-        self._paths = PathField(self.blocked)
+        self._paths: PathField | None = None  # built on first use
+
+    def restrict(self, free: np.ndarray) -> None:
+        """Plan over exactly the `free` cells from now on."""
+        if np.any(free & (self.room < self.res / math.sqrt(2.0))):
+            raise ValueError("a free cell lies so close to an obstacle that a wall could leak")
+        self.blocked = ~free
+        self._paths = None
 
     def _clearance(self, world: World) -> np.ndarray:
         """Distance from each cell centre to the nearest obstacle, capped at `cap`.
@@ -197,6 +205,8 @@ class NavGrid:
         start = self.free_cell_near(x, y)
         if start is None:
             return np.full((self.nx, self.ny), np.inf)
+        if self._paths is None:
+            self._paths = PathField(self.blocked)
         return self._paths.distances(start) * self.res
 
     def distance(self, field: np.ndarray, x: float, y: float) -> float:
@@ -226,17 +236,14 @@ class NavGrid:
         return float(field[near]) + math.hypot(x - cx, y - cy)
 
     def sample_goal(self, field: np.ndarray, rng: np.random.Generator,
-                    distance: tuple[float, float], clearance: float,
-                    allowed: np.ndarray | None = None) -> tuple[float, float] | None:
-        """A random cell centre at a path distance within `distance`, at least `clearance`
-        from every obstacle, and inside the `allowed` mask if one is given. If no cell is in
-        range, the farthest cell that qualifies otherwise, so a car boxed into a small pocket
-        still has somewhere to go. None if no cell qualifies at all."""
+                    distance: tuple[float, float], clearance: float) -> tuple[float, float] | None:
+        """A random cell centre at a path distance within `distance` and at least `clearance`
+        from every obstacle. If no cell is in range, the farthest cell that is clear enough,
+        so a car boxed into a small pocket still has somewhere to go. None if there is no
+        such cell at all."""
         if clearance > self.cap + 1e-9:
             raise ValueError(f"clearance {clearance} is beyond the raster cap {self.cap}")
         ok = np.isfinite(field) & (self.room >= clearance) & (field > 0.0)
-        if allowed is not None:
-            ok &= allowed
         in_range = np.flatnonzero(ok & (field >= distance[0]) & (field <= distance[1]))
         if in_range.size:
             k = int(in_range[rng.integers(in_range.size)])

@@ -88,15 +88,15 @@ noise. `train_ppo_v7.yaml` sets `mean_penalty`, a quadratic charge on pre-tanh m
 `train/mean_penalty` and `train/pre_tanh_mean_abs` log it alone.
 
 `configs/env_waypoint.yaml` drives to chained goals instead of exploring (`envs/goals.py`).
-Its reward pays for path distance closed, measured on a 0.2 m occupancy raster by
-`world/navigation.py`. It never pays for straight-line distance, which would reward pressing
-against the wall between the car and its goal; `tests/test_goals.py` pins the U-trap case.
-Random walls also made traps: in one big-arena seed, two parallel walls 0.34 m apart with
-offset doorways boxed the spawn into about 6 m² whose only exits no car could turn through.
-So the waypoint arenas set `min_passage` 0.8, which redraws any wall or cone leaving a gap
-under 0.8 m between separate obstacles, and spawns and goals sit only on the largest stretch
-of floor joined by passages at least `drivable_width` (0.8 m) wide. Every goal has a route.
-The observation gains three floats
+Its reward pays for path distance closed, on a 0.075 m raster (`world/navigation.py`). It
+never pays for straight-line distance, which would reward pressing against the wall between
+the car and its goal; `tests/test_goals.py` pins the U-trap case. Path distance, spawns and
+goals all use the floor the car body can drive to (`world/reachability.py`): lattice poses
+over cells and 16 headings, joined by turning-radius arcs and straight runs, forward or
+reversing. No fixed inflation gets narrow gaps right. At 0.8 m it sealed a pocket the car
+drives out of in a straight line (big-arena seed 2000001, where the policy just missed the
+gap), and no width alone tells a doorway the car meets straight on from a corner it cannot
+fit round. The observation gains three floats
 (`docs/goal-block.md`, a change the Android app must mirror), and best models are kept by
 `clean_goals`.
 

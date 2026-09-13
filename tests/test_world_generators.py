@@ -156,31 +156,3 @@ def test_big_arenas_are_as_cluttered_as_phase1_arenas():
     big_wall, big_cones = obstacles_per_m2("env_phase1_light_big.yaml")
     assert big_wall == pytest.approx(wall, rel=0.12)
     assert big_cones == pytest.approx(cones, rel=0.12)
-
-
-def test_min_passage_leaves_no_gap_narrower_than_it_between_separate_obstacles():
-    from selfdrive.config import load_env_config
-    from selfdrive.world.geometry import point_seg_distance
-
-    p = load_env_config("configs/env_waypoint.yaml").arena
-    for seed in range(15):
-        w = make_arena(np.random.default_rng(seed), p)
-        lo = np.minimum(w.segments[:, :2], w.segments[:, 2:])
-        hi = np.maximum(w.segments[:, :2], w.segments[:, 2:])
-        apart = np.maximum(0.0, np.maximum(lo[:, None] - hi[None], lo[None] - hi[:, None]))
-        d = np.hypot(apart[..., 0], apart[..., 1])
-        assert not np.any((d > 1e-9) & (d < p.min_passage - 1e-9)), seed
-        if len(w.circles):
-            c = w.circles
-            wall_gap = point_seg_distance(c[:, :2], w.seg_a, w.seg_e).min(axis=1) - c[:, 2]
-            assert wall_gap.min() >= p.min_passage - 1e-9
-            pair = np.hypot(*(c[:, None, :2] - c[None, :, :2]).transpose(2, 0, 1))
-            pair = pair - c[:, None, 2] - c[None, :, 2] + np.eye(len(c)) * 1e9
-            assert pair.min() >= p.min_passage - 1e-9
-
-
-def test_doorways_narrower_than_min_passage_are_rejected():
-    import pytest
-
-    with pytest.raises(ValueError, match="narrower than min_passage"):
-        make_arena(np.random.default_rng(0), ArenaParams(min_passage=0.8))
