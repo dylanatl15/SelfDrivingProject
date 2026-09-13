@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import shutil
 import time
@@ -64,6 +65,9 @@ DEFAULTS: dict = {
     # train/policies.py. 0 keeps the stock MlpPolicy.
     "mean_penalty": 0.0,
     "mean_margin": 1.5,
+    # Floor on the gSDE log noise scale, which PPO's KL cap otherwise shrinks until updates
+    # barely move the policy; see train/policies.py. None leaves it free.
+    "log_std_min": None,
     "normalize_reward": True,
     "eval_every_steps": 500_000,
     "eval_episodes": 20,
@@ -133,6 +137,8 @@ def start_run(args: argparse.Namespace):
     if cfg["mean_penalty"] > 0:
         print(f"mean penalty {cfg['mean_penalty']} per unit^2 of pre-tanh mean past "
               f"{cfg['mean_margin']}")
+    if cfg["log_std_min"] is not None:
+        print(f"noise floor  log std {cfg['log_std_min']} (std {math.exp(cfg['log_std_min']):.3f})")
     print(f"budget       {cfg['total_timesteps']:,} steps")
 
     venv = make_vec_env(
@@ -146,10 +152,10 @@ def start_run(args: argparse.Namespace):
         "squash_output": cfg["squash_output"],
         "log_std_init": cfg["log_std_init"],
     }
-    if cfg["mean_penalty"] > 0:
+    if cfg["mean_penalty"] > 0 or cfg["log_std_min"] is not None:
         policy = MeanPenaltyPolicy
         policy_kwargs.update(mean_penalty=cfg["mean_penalty"], mean_margin=cfg["mean_margin"],
-                             ent_coef=cfg["ent_coef"])
+                             ent_coef=cfg["ent_coef"], log_std_min=cfg["log_std_min"])
 
     model = PPO(
         policy,

@@ -48,7 +48,8 @@ class RewardTermLogger(BaseCallback):
 
 
 class MeanPenaltyLogger(BaseCallback):
-    """The pre-tanh mean penalty on its own, since `train/entropy_loss` has it mixed in.
+    """The pre-tanh mean penalty on its own, since `train/entropy_loss` has it mixed in, and
+    the share of noise scales held at the noise floor.
 
     Values are from the last minibatch of the last update; see train/policies.py.
     """
@@ -61,6 +62,10 @@ class MeanPenaltyLogger(BaseCallback):
         if getattr(policy, "mean_penalty", 0.0) > 0 and self.model._n_updates > 0:
             self.logger.record("train/mean_penalty", policy.last_mean_penalty)
             self.logger.record("train/pre_tanh_mean_abs", policy.last_mean_abs)
+        floor = getattr(policy, "log_std_min", None)
+        if floor is not None and self.model._n_updates > 0:
+            at_floor = (policy.log_std.detach() <= floor + 1e-6).float().mean()
+            self.logger.record("train/std_at_floor", float(at_floor))
 
 
 class EpisodeCsvLogger(BaseCallback):
