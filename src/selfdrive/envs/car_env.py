@@ -37,6 +37,7 @@ from .memory import EgoMemory
 from .obs import ObsConfig, ObservationBuilder
 from .randomize import DomainRandConfig
 from .rewards import RewardConfig, RewardFunction
+from .shield import BRAKED, CAPPED, ShieldConfig, reported_distances, shield_throttle
 
 # Action layout. Kept as constants because the Android app indexes the same order.
 STEER = 0
@@ -58,6 +59,7 @@ class EnvConfig:
     arena: ArenaParams = field(default_factory=lambda: ArenaParams(kind="random"))
     domain_rand: DomainRandConfig = field(default_factory=DomainRandConfig)
     goal: GoalConfig = field(default_factory=GoalConfig)  # read only with obs.goal_block
+    shield: ShieldConfig = field(default_factory=ShieldConfig)
     dt: float = 1.0 / 30.0
     max_steps: int = 1500  # ~50 s at 30 Hz
 
@@ -201,6 +203,8 @@ class CarEnv(gym.Env):
             "backing_steps": 0.0,
             "lock_steps": 0.0,
             "collided": 0.0,
+            "shield_capped": 0.0,
+            "shield_braked": 0.0,
         }
 
         obs = self.obs_builder.reset(*self._frame())
@@ -261,6 +265,7 @@ class CarEnv(gym.Env):
         depth = self.depth.sample(self.world, s, self.dt, self.np_random)
         ultra = self.ultra.sample(self.world, s, self.dt, self.np_random)
         ring = self._remember(depth, ultra) if self.memory is not None else None
+        self._depth_seen, self._ultra_seen = depth, ultra  # what the shield reads next step
         if self.ultra.n < self.cfg.obs.n_ultrasonic:
             # A 3-sensor build still has to fill a fixed-width observation slot.
             ultra = np.concatenate([ultra, np.full(self.cfg.obs.n_ultrasonic - self.ultra.n,
@@ -317,6 +322,9 @@ class CarEnv(gym.Env):
 
     def step(self, action):
         action = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
+        shielded = None
+        if self.cfg.shield.enabled:
+            action, shielded = self._shield(action)
         prev_steer_cmd = float(self._last_action[STEER])
         prev_throttle_cmd = float(self._last_action[THROTTLE])
         p = self.car.p
@@ -385,6 +393,9 @@ class CarEnv(gym.Env):
         # Forward at near-full steering lock: how phase1_v2 circled open patches.
         self._episode["lock_steps"] += float(abs(action[STEER]) > 0.8 and action[THROTTLE] > 0)
         self._episode["collided"] = float(collided)
+        if shielded is not None:
+            self._episode["shield_capped"] += float(shielded == CAPPED)
+            self._episode["shield_braked"] += float(shielded == BRAKED)
 
         obs = self.obs_builder.push(*self._frame())
         terminated = bool(collided)
@@ -393,6 +404,9 @@ class CarEnv(gym.Env):
         info: dict = {"reward_terms": terms.as_dict(), "clearance": clearance}
         if reached:
             info["goal_reached"] = True
+        if shielded is not None:
+            info["shield"] = shielded
+            info["throttle_sent"] = float(action[THROTTLE])
         if terminated or truncated:
             info["episode_metrics"] = self._summary(truncated)
         return obs, float(reward), terminated, truncated, info
@@ -419,7 +433,24 @@ class CarEnv(gym.Env):
             out["goals_reached"] = float(self.goals.reached)
             # Net path metres closed across every goal, the one being driven to included.
             out["goal_progress_m"] = self.goals.progress_m
+        if self.cfg.shield.enabled:
+            out["shield_capped_frac"] = self._episode["shield_capped"] / n
+            out["shield_braked_frac"] = self._episode["shield_braked"] / n
         return out
+
+    def _shield(self, action: np.ndarray) -> tuple[np.ndarray, int]:
+        """The action with the throttle the shield sends (`envs/shield.py`), and what it did.
+
+        It reads the readings the last observation was built from and the speed at the start
+        of this step, which is the telemetry the phone holds when the policy answers.
+        """
+        forward, back = reported_distances(self._depth_seen, self._ultra_seen, self.ultra.names)
+        throttle, did = shield_throttle(
+            float(action[THROTTLE]), float(self.car.state.speed), forward, back,
+            self.cfg.shield, self.cfg.car.max_speed_fwd, self.cfg.car.max_speed_rev)
+        action = action.copy()
+        action[THROTTLE] = throttle
+        return action, did
 
     # --- rendering -----------------------------------------------------------
 
