@@ -23,6 +23,7 @@ from .envs.goals import GoalConfig
 from .envs.obs import ObsConfig
 from .envs.randomize import DomainRandConfig
 from .envs.rewards import RewardConfig
+from .envs.shield import ShieldConfig
 from .sensors.depth_arc import DepthArcParams
 from .sensors.odometry import OdometryParams
 from .sensors.ultrasonic import UltrasonicParams
@@ -38,6 +39,7 @@ SECTIONS: dict[str, type] = {
     "arena": ArenaParams,
     "domain_rand": DomainRandConfig,
     "goal": GoalConfig,
+    "shield": ShieldConfig,
 }
 
 # Degree-valued aliases accepted in YAML, mapped to the radian field they set.
