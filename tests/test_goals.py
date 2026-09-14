@@ -502,3 +502,14 @@ def test_waypoint_s2_config_is_pay5_with_both_stage1_winners():
     assert ours["goal"].pop("arrival_from_odometry") is True
     assert ours["domain_rand"].pop("odom_yaw_noise") == [0.005, 0.025]
     assert ours == base
+
+
+def test_waypoint_s2c_configs_are_their_bases_with_a_little_pay_for_new_ground():
+    for base, arm in [("configs/env_waypoint_s2.yaml", "configs/env_waypoint_s2c_explore.yaml"),
+                      ("configs/env_waypoint_s2_patience.yaml",
+                       "configs/env_waypoint_s2c_patience_explore.yaml")]:
+        want, got = load_yaml(base), load_yaml(arm)
+        assert want["reward"].pop("w_explore") == 0.0
+        assert got["reward"].pop("w_explore") == 0.3
+        assert got == want
+        assert load_env_config(arm).reward.w_explore == 0.3
