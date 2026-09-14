@@ -12,6 +12,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
+from selfdrive.config import load_env_config, load_yaml
 from selfdrive.dynamics.actuators import Actuators
 from selfdrive.dynamics.base import CarParams
 from selfdrive.envs.braking import arc_pose, brake_shortfall, stopping_distance
@@ -136,3 +137,11 @@ def test_the_env_charges_driving_at_a_wall_faster_than_the_car_can_stop():
 def test_the_term_is_off_by_default():
     assert RewardConfig().w_brake == 0.0
     assert set(drive_at_wall(brake_env(0.0))) == {0.0}
+
+
+def test_waypoint_s2_brake_config_is_the_stage2_base_with_the_brake_term():
+    base = load_yaml("configs/env_waypoint_s2.yaml")
+    ours = load_yaml("configs/env_waypoint_s2_brake.yaml")
+    assert ours["reward"].pop("w_brake") == 5.0
+    assert ours == base
+    assert load_env_config("configs/env_waypoint_s2_brake.yaml").reward.w_brake == 5.0
