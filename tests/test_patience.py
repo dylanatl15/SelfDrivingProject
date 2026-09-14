@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from gymnasium.utils.env_checker import check_env
 
+from selfdrive.config import load_env_config, load_yaml
 from selfdrive.envs.car_env import CarEnv, EnvConfig
 from selfdrive.envs.goals import GoalPatience
 from selfdrive.envs.obs import ObsConfig, ObservationBuilder
@@ -117,3 +118,13 @@ def test_patience_env_passes_the_gymnasium_checker():
     env = patience_env()
     assert env.observation_space.shape == (72,)
     check_env(env, skip_render_check=True)
+
+
+def test_waypoint_s2_patience_config_is_the_stage2_base_with_the_clock():
+    base = load_yaml("configs/env_waypoint_s2.yaml")
+    ours = load_yaml("configs/env_waypoint_s2_patience.yaml")
+    added = ("goal_patience", "norm_patience_max", "patience_gain")
+    assert {k: ours["obs"].pop(k) for k in added} == {
+        "goal_patience": True, "norm_patience_max": 10.0, "patience_gain": 0.25}
+    assert ours == base
+    assert load_env_config("configs/env_waypoint_s2_patience.yaml").obs.size == 120

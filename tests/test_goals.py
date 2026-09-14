@@ -494,3 +494,11 @@ def test_waypoint_pin_config_is_pay5_with_arrival_judged_from_odometry():
     ours = load_yaml("configs/env_waypoint_pay5_pin.yaml")
     assert ours["goal"].pop("arrival_from_odometry") is True
     assert ours == base
+
+
+def test_waypoint_s2_config_is_pay5_with_both_stage1_winners():
+    base = load_yaml("configs/env_waypoint_pay5.yaml")
+    ours = load_yaml("configs/env_waypoint_s2.yaml")
+    assert ours["goal"].pop("arrival_from_odometry") is True
+    assert ours["domain_rand"].pop("odom_yaw_noise") == [0.005, 0.025]
+    assert ours == base
