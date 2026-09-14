@@ -108,6 +108,20 @@ path distance to the goal. Without it, arrival waits for the true goal: in pay5'
 the goal the policy saw sat a median 0.37 m from the real one, and beyond the 0.5 m arrival
 radius on 30 % of steps.
 
+The Stage 1 exam (100 held-out seeds from 3,000,000, full drift) kept that rule and the halved
+heading drift range of `env_waypoint_pay5_yaw25.yaml`: each beat pay5 by 0.8-1.0 clean goals
+at 3M. `env_waypoint_s2.yaml` carries both. The narrower drift is a guess until ARCore has
+been measured; yaw25 models lose most on the widest drift draws. A floor on the gSDE noise
+(`train_ppo_v8.yaml`) did not help. The 20-episode training eval disagreed with the exam by
+0.35 clean goals, so pick checkpoints by the exam, not by `best_model`.
+
+Two Stage 2 additions are off by default. `reward.w_brake` (`envs/braking.py`) charges the
+share of the stopping distance, laid along the current arc, that the body cannot drive; on
+pay5's driving it fired only in the 0.2-0.4 s before crashes. `obs.goal_patience` adds a
+fourth goal float, seconds since the range to the goal last fell 0.25 m below its best, so a
+car dithering in a dead end sees something change; the phone must compute it too
+(`docs/goal-block.md`).
+
 ## Throughput ceiling - do not chase it
 
 `python -m selfdrive.train.bench` reports ~900 steps/s single-process and ~4,800 across
