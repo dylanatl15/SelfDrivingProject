@@ -11,7 +11,7 @@ import math
 import numpy as np
 import pytest
 
-from selfdrive.config import env_config_from_dict
+from selfdrive.config import env_config_from_dict, load_env_config, load_yaml
 from selfdrive.envs.car_env import CarEnv, EnvConfig
 from selfdrive.envs.randomize import DomainRandConfig
 from selfdrive.envs.shield import (BRAKED, CAPPED, PASSED, ShieldConfig, allowed_speed,
@@ -140,3 +140,13 @@ def test_the_shield_section_loads_from_yaml_and_is_off_by_default():
     cfg = env_config_from_dict({"shield": {"enabled": True, "margin": 0.12, "floor": 0.05}})
     assert cfg.shield == ShieldConfig(enabled=True, margin=0.12, floor=0.05)
     assert EnvConfig().shield.enabled is False
+
+
+def test_waypoint_s2_patience_shield_config_is_the_patience_arm_with_the_shield():
+    base = load_yaml("configs/env_waypoint_s2_patience.yaml")
+    ours = load_yaml("configs/env_waypoint_s2_patience_shield.yaml")
+    assert ours.pop("shield") == {"enabled": True, "margin": 0.12, "horizon": 0.45,
+                                  "floor": 0.05, "brake": 0.3, "slack": 0.05}
+    assert ours == base
+    cfg = load_env_config("configs/env_waypoint_s2_patience_shield.yaml")
+    assert cfg.shield.enabled and cfg.obs.size == 120
