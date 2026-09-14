@@ -15,7 +15,9 @@ first, then `docs/protocol.md`.
 - **`ObsConfig` normalization constants are a published interface.** They are mirrored
   by hand in the Android app. Changing one invalidates every trained checkpoint.
 - **Never import pygame at module scope.** Twenty training workers must not load it.
-  `CarEnv.render()` imports it lazily; keep it that way.
+  `CarEnv.render()` imports it lazily; keep it that way. Nor call `pygame.init()`: it opens
+  audio as well, and in a trainer recording eval videos the PulseAudio thread hung
+  `pygame.quit()` for good.
 - **Rewards read ground truth, observations read noisy sensors.** Do not "simplify" the
   reward to use sensor readings — that trains the policy to chase its own noise.
 - **Domain randomization must be drawn from `self.np_random`.** Anything sampled from a

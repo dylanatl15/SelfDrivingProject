@@ -72,9 +72,11 @@ class PygameView:
         self.fps = fps
         self.size = size
 
-        pygame.init()
+        # Only what gets drawn with. pygame.init() opens audio too, and in a trainer recording
+        # eval videos its PulseAudio thread left pygame.quit() waiting forever at the next eval.
         pygame.font.init()
         if mode == "human":
+            pygame.display.init()
             self.screen = pygame.display.set_mode(size)
             pygame.display.set_caption("selfdrive - phase 1")
             self.clock = pygame.time.Clock()
