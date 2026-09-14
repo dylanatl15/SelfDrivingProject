@@ -75,6 +75,28 @@ def test_mean_penalty_policy_trains_saves_and_resumes(tmp_path):
     assert (model.policy.mean_penalty, model.policy.mean_margin) == (0.05, 1.5)
 
 
+def test_learning_rate_falls_over_the_budget_and_carries_on_after_a_resume(tmp_path):
+    config = tiny_run_config(tmp_path, 256, learning_rate=3e-4, learning_rate_final=3e-5)
+    train_ppo.main(["--config", str(config), "--name", "run", "--total-timesteps", "128"])
+    model = PPO.load(tmp_path / "run" / "final_model.zip")
+    assert [model.lr_schedule(p) for p in (1.0, 0.5, 0.0)] == pytest.approx([3e-4, 1.65e-4, 3e-5])
+
+    # Budget 256 on resume: the last update, at 256 of 256 steps, runs at the final rate.
+    checkpoint = tmp_path / "run" / "checkpoints" / "ppo_128_steps.zip"
+    train_ppo.main(["--resume", str(checkpoint), "--total-timesteps", "256"])
+    model = PPO.load(tmp_path / "run" / "final_model.zip")
+    assert model.num_timesteps == 256
+    assert model.policy.optimizer.param_groups[0]["lr"] == pytest.approx(3e-5)
+    assert model.lr_schedule(0.5) == pytest.approx(1.65e-4)
+
+
+def test_learning_rate_stays_constant_by_default(tmp_path):
+    train_ppo.main(["--config", str(tiny_run_config(tmp_path, 128)), "--name", "run"])
+    model = PPO.load(tmp_path / "run" / "final_model.zip")
+    assert model.learning_rate == 3e-4
+    assert model.policy.optimizer.param_groups[0]["lr"] == pytest.approx(3e-4)
+
+
 def test_trainer_pins_torch_threads(tmp_path):
     # Unpinned trainers running side by side starved each other's workers of CPU.
     before = torch.get_num_threads()
