@@ -48,6 +48,38 @@ else if throttle < 0:
 
 The side ultrasonics are not read.
 
+## Backing out (only when `unstick_after` > 0)
+
+A model trained without the shield never learned that pushing into its cap gets nowhere. With
+the shield bolted on, such a model can sit nose-in against an obstacle at full lock, asking for
+forward throttle that the shield cuts to a crawl, with clear floor behind it. This optional
+rule backs it out:
+
+```
+// kept across control steps, all zero when driving starts
+held = 0; left = 0; backing_steer = 0
+
+each step, after the policy answers:
+if left > 0:
+    left = left - 1
+    throttle = shielded(-unstick_throttle)       // the rule above, reverse branch
+    if throttle == 0: left = 0                   // nothing more behind
+    steer = backing_steer
+else:
+    out = shielded(throttle)
+    if unstick_after > 0:
+        if throttle > 0 and the shield capped it and |v_mps| < unstick_speed: held = held + 1
+        else: held = 0
+        if held >= round(unstick_after / period) and allowed(back) > 0:
+            held = 0; left = round(unstick_for / period); backing_steer = -steer
+    throttle = out                               // steer stays the policy's
+```
+
+`period` is the control period, about 1/30 s. Reversing on the opposite lock turns the heading
+the way the policy was steering, so the nose swings off the obstacle, as in a three-point turn.
+While backing out the shield sets the steering as well as the throttle, and the next
+observation's last-steer and last-throttle inputs are the values sent, as always.
+
 ## Constants
 
 Read these from the `shield:` section of the model's environment config. The defaults are:
@@ -59,6 +91,10 @@ Read these from the `shield:` section of the model's environment config. The def
 | `floor` | 0.0 | m/s | least allowed speed while the distance exceeds the margin |
 | `brake` | 0.3 | throttle | command against the motion when the car is too fast |
 | `slack` | 0.05 | m/s | how far over the allowed speed the car may be before braking |
+| `unstick_after` | 0 | s | held this long while pushing forward, back out; 0 never does |
+| `unstick_for` | 1.0 | s | how long to back out, cut short at the back margin |
+| `unstick_throttle` | 0.5 | throttle | reverse command while backing out, capped by the rule |
+| `unstick_speed` | 0.1 | m/s | slower than this while capped counts as held |
 | `MAX_SPEED_FWD` | 1.5 | m/s | `car.max_speed_fwd`: the speed at throttle +1 |
 | `MAX_SPEED_REV` | 0.6 | m/s | `car.max_speed_rev`: the speed at throttle −1 |
 

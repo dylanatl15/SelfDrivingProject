@@ -79,7 +79,7 @@ class EpisodeCsvLogger(BaseCallback):
         "timesteps", "wall_s", "distance_m", "coverage_m2", "mean_speed_mps", "min_clearance_m",
         "stall_frac", "reverse_frac", "backing_frac", "lock_frac", "retrace_frac", "collided",
         "stuck", "steps", "goals_reached", "goal_progress_m", "shield_capped_frac",
-        "shield_braked_frac",
+        "shield_braked_frac", "shield_unstuck_frac",
     ]
 
     def __init__(self, path: str | Path, start_timesteps: int = 0, verbose: int = 0):

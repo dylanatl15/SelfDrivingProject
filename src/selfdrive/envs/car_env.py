@@ -37,7 +37,7 @@ from .memory import EgoMemory
 from .obs import ObsConfig, ObservationBuilder
 from .randomize import DomainRandConfig
 from .rewards import RewardConfig, RewardFunction
-from .shield import BRAKED, CAPPED, ShieldConfig, reported_distances, shield_throttle
+from .shield import BRAKED, CAPPED, UNSTUCK, ShieldConfig, Unstick, reported_distances
 
 # Action layout. Kept as constants because the Android app indexes the same order.
 STEER = 0
@@ -194,6 +194,7 @@ class CarEnv(gym.Env):
                 self.patience.reset(self._goal_range())
         self.steps = 0
         self._last_action[:] = 0.0
+        self._unstick = Unstick(self.cfg.shield, self.dt)
         self._episode = {
             "distance": 0.0,
             "speed_sum": 0.0,
@@ -205,6 +206,7 @@ class CarEnv(gym.Env):
             "collided": 0.0,
             "shield_capped": 0.0,
             "shield_braked": 0.0,
+            "shield_unstuck": 0.0,
         }
 
         obs = self.obs_builder.reset(*self._frame())
@@ -396,6 +398,7 @@ class CarEnv(gym.Env):
         if shielded is not None:
             self._episode["shield_capped"] += float(shielded == CAPPED)
             self._episode["shield_braked"] += float(shielded == BRAKED)
+            self._episode["shield_unstuck"] += float(shielded == UNSTUCK)
 
         obs = self.obs_builder.push(*self._frame())
         terminated = bool(collided)
@@ -436,20 +439,23 @@ class CarEnv(gym.Env):
         if self.cfg.shield.enabled:
             out["shield_capped_frac"] = self._episode["shield_capped"] / n
             out["shield_braked_frac"] = self._episode["shield_braked"] / n
+            out["shield_unstuck_frac"] = self._episode["shield_unstuck"] / n
         return out
 
     def _shield(self, action: np.ndarray) -> tuple[np.ndarray, int]:
-        """The action with the throttle the shield sends (`envs/shield.py`), and what it did.
+        """The action the shield sends (`envs/shield.py`), and what it did: the capped
+        throttle, and while backing out the steering too.
 
         It reads the readings the last observation was built from and the speed at the start
         of this step, which is the telemetry the phone holds when the policy answers.
         """
         forward, back = reported_distances(self._depth_seen, self._ultra_seen, self.ultra.names)
-        throttle, did = shield_throttle(
-            float(action[THROTTLE]), float(self.car.state.speed), forward, back,
-            self.cfg.shield, self.cfg.car.max_speed_fwd, self.cfg.car.max_speed_rev)
+        c = self.cfg.car
+        steer, throttle, did = self._unstick.step(
+            float(action[STEER]), float(action[THROTTLE]), float(self.car.state.speed), forward,
+            back, c.max_speed_fwd, c.max_speed_rev)
         action = action.copy()
-        action[THROTTLE] = throttle
+        action[STEER], action[THROTTLE] = steer, throttle
         return action, did
 
     # --- rendering -----------------------------------------------------------
