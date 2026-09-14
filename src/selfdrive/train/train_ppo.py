@@ -252,19 +252,24 @@ def main(argv=None) -> None:
         ),
     ])
 
+    finished = False
     try:
         # Continuing a run keeps its step count, so TensorBoard and the checkpoint names
         # carry on from the checkpoint rather than starting again at zero.
         model.learn(total_timesteps=cfg["total_timesteps"] - start, callback=callbacks,
                     reset_num_timesteps=start == 0, progress_bar=False)
+        finished = True
     except KeyboardInterrupt:
         print("\ninterrupted - saving before exit")
     finally:
         model.save(run_dir / "final_model")
         if cfg["normalize_reward"]:
             venv.save(str(run_dir / "vecnormalize.pkl"))
-        venv.close()
         print(f"saved to {run_dir}")
+        # Ctrl-C mid-rollout can leave SubprocVecEnv waiting on worker replies it has already
+        # read, and close() then blocks forever. The workers are daemons and exit with us.
+        if finished:
+            venv.close()
 
 
 if __name__ == "__main__":
