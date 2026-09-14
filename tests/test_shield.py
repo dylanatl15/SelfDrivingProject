@@ -14,8 +14,17 @@ import pytest
 from selfdrive.config import env_config_from_dict, load_env_config, load_yaml
 from selfdrive.envs.car_env import CarEnv, EnvConfig
 from selfdrive.envs.randomize import DomainRandConfig
-from selfdrive.envs.shield import (BRAKED, CAPPED, PASSED, ShieldConfig, allowed_speed,
-                                   reported_distances, shield_throttle)
+from selfdrive.envs.shield import (
+    BRAKED,
+    CAPPED,
+    PASSED,
+    UNSTUCK,
+    ShieldConfig,
+    Unstick,
+    allowed_speed,
+    reported_distances,
+    shield_throttle,
+)
 from selfdrive.world.geometry import World
 
 S = ShieldConfig(enabled=True)  # margin 0.15 m, horizon 0.5 s, no floor, brake 0.3
@@ -134,6 +143,60 @@ def test_the_observation_sees_the_throttle_that_was_sent():
     last_throttle = (o.frame_stack - 1) * o.per_frame + o.n_depth + 1 + o.n_ultrasonic + 2
     assert info["shield"] == CAPPED and 0.0 < info["throttle_sent"] < 0.5
     assert obs[last_throttle] == pytest.approx(info["throttle_sent"])
+
+
+UN = ShieldConfig(enabled=True, unstick_after=0.5, unstick_for=0.3)  # 15 and 9 steps at 30 Hz
+HZ30 = 1 / 30
+
+
+def test_backing_out_is_off_unless_configured():
+    u, rng = Unstick(S, HZ30), np.random.default_rng(1)
+    for _ in range(3000):
+        steer, throttle = rng.uniform(-1, 1, 2)
+        speed, forward, back = rng.uniform(-0.1, 0.1), *rng.uniform(0.0, 1.0, 2)
+        expected = (steer, *shield(throttle, speed, forward, back))
+        assert u.step(steer, throttle, speed, forward, back, V_FWD, V_REV) == expected
+    for _ in range(100):  # pushing into a wall forever never backs out
+        assert u.step(0.9, 1.0, 0.0, 0.10, 2.0, V_FWD, V_REV) == (0.9, 0.0, CAPPED)
+
+
+def test_held_against_an_obstacle_the_car_backs_out_on_the_mirrored_lock():
+    u = Unstick(UN, HZ30)
+    for _ in range(15):
+        assert u.step(0.9, 1.0, 0.0, 0.10, 2.0, V_FWD, V_REV) == (0.9, 0.0, CAPPED)
+    backing = [u.step(0.9, 1.0, 0.0, 0.10, 2.0, V_FWD, V_REV) for _ in range(9)]
+    assert backing == [(-0.9, -0.5, UNSTUCK)] * 9
+    assert u.step(0.9, 1.0, 0.0, 0.10, 2.0, V_FWD, V_REV) == (0.9, 0.0, CAPPED)  # policy's again
+
+
+def test_backing_out_needs_room_behind_and_a_steady_push():
+    u = Unstick(UN, HZ30)
+    for _ in range(40):  # nothing behind: never starts
+        assert u.step(0.9, 1.0, 0.0, 0.10, 0.12, V_FWD, V_REV)[2] == CAPPED
+    u = Unstick(UN, HZ30)
+    for i in range(60):  # a pause in the push restarts the count, as does moving
+        assert u.step(0.9, 1.0 if i % 10 else 0.0, 0.0, 0.10, 2.0, V_FWD, V_REV)[2] != UNSTUCK
+        assert u.step(0.9, 1.0, 0.2, 0.40, 2.0, V_FWD, V_REV)[2] != UNSTUCK
+
+
+def test_backing_out_stops_at_the_back_margin():
+    u = Unstick(UN, HZ30)
+    for _ in range(15):
+        u.step(0.9, 1.0, 0.0, 0.10, 2.0, V_FWD, V_REV)
+    assert u.step(0.9, 1.0, 0.0, 0.10, 2.0, V_FWD, V_REV)[1:] == (-0.5, UNSTUCK)
+    assert u.step(0.9, 1.0, 0.0, 0.10, 0.12, V_FWD, V_REV) == (-0.9, 0.0, UNSTUCK)  # wall behind
+    assert u.step(0.9, 1.0, 0.0, 0.10, 2.0, V_FWD, V_REV)[2] == CAPPED  # done backing out
+
+
+def test_the_car_backs_out_of_a_wall_the_shield_holds_it_against():
+    ahead = walled((15.6, 10.0, 15.6, 20.0))  # 0.4 m past the front bumper
+    crashed, _, info = drive(S, ahead, 1.0, steps=400)
+    assert not crashed and info["episode_metrics"]["stuck"] == 1.0
+    unstick = ShieldConfig(enabled=True, unstick_after=1.0, unstick_for=1.0)
+    crashed, _, info = drive(unstick, ahead, 1.0, steps=400)
+    m = info["episode_metrics"]
+    assert not crashed and m["stuck"] == 0.0
+    assert m["shield_unstuck_frac"] > 0.0 and m["backing_frac"] > 0.0
 
 
 def test_the_shield_section_loads_from_yaml_and_is_off_by_default():
