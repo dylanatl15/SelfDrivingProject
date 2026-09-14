@@ -26,6 +26,7 @@ from pathlib import Path
 import torch as th
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback
+from stable_baselines3.common.utils import LinearSchedule
 from stable_baselines3.common.vec_env import VecNormalize
 
 from ..config import describe, load_env_config, load_yaml
@@ -48,6 +49,8 @@ DEFAULTS: dict = {
     "batch_size": 512,
     "n_epochs": 10,
     "learning_rate": 3.0e-4,
+    # Where the rate ends after falling linearly over the budget; None keeps it constant.
+    "learning_rate_final": None,
     "gamma": 0.995,
     "gae_lambda": 0.95,
     "clip_range": 0.2,
@@ -106,6 +109,17 @@ def resolve(args: argparse.Namespace) -> dict:
     return cfg
 
 
+def learning_rate(cfg: dict):
+    """The configured rate, or a linear fall to `learning_rate_final` over the budget.
+
+    SB3 measures progress against the whole budget, a resumed run included, and the schedule
+    is saved with the model, so a resume carries on down the same line.
+    """
+    if cfg["learning_rate_final"] is None:
+        return cfg["learning_rate"]
+    return LinearSchedule(cfg["learning_rate"], cfg["learning_rate_final"], end_fraction=1.0)
+
+
 def start_run(args: argparse.Namespace):
     cfg = resolve(args)
     th.set_num_threads(cfg["torch_threads"])
@@ -139,6 +153,8 @@ def start_run(args: argparse.Namespace):
               f"{cfg['mean_margin']}")
     if cfg["log_std_min"] is not None:
         print(f"noise floor  log std {cfg['log_std_min']} (std {math.exp(cfg['log_std_min']):.3f})")
+    if cfg["learning_rate_final"] is not None:
+        print(f"learn rate   {cfg['learning_rate']:g} falling to {cfg['learning_rate_final']:g}")
     print(f"budget       {cfg['total_timesteps']:,} steps")
 
     venv = make_vec_env(
@@ -166,7 +182,7 @@ def start_run(args: argparse.Namespace):
         n_steps=cfg["n_steps"],
         batch_size=cfg["batch_size"],
         n_epochs=cfg["n_epochs"],
-        learning_rate=cfg["learning_rate"],
+        learning_rate=learning_rate(cfg),
         gamma=cfg["gamma"],
         gae_lambda=cfg["gae_lambda"],
         clip_range=cfg["clip_range"],

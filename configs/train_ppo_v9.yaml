@@ -1,0 +1,46 @@
+# train_ppo_v7.yaml with the learning rate falling linearly from 3e-4 to 3e-5 over 12M steps.
+#
+# At v7's constant 3e-4 the 20M patience runs (waypoint_s2_patience and _seed1) did their
+# best on the Stage 1 exam between 9.5M and 16M, and seed 1 slid to 1.31 clean goals by 20M.
+# After 10M steps every update in both runs stopped at the KL cap, nine in ten of them within
+# the first two of their ten passes over the batch, and exam scores swung by about 0.5 clean
+# goals from one checkpoint to the next. A falling rate lets late updates use their passes
+# without moving the policy as far.
+
+env_config: configs/env_waypoint_s2_patience.yaml
+n_envs: 10
+total_timesteps: 12000000
+seed: 0
+device: cpu
+
+policy: MlpPolicy
+net_arch: [256, 256]
+
+n_steps: 1024           # x 10 workers = 10240 samples
+batch_size: 2048
+n_epochs: 10
+learning_rate: 3.0e-4
+learning_rate_final: 3.0e-5
+gamma: 0.995            # ~6.7 s horizon at 30 Hz
+gae_lambda: 0.95
+clip_range: 0.2
+target_kl: 0.03
+ent_coef: 0.005
+vf_coef: 0.5
+max_grad_norm: 0.5
+
+use_sde: true
+sde_sample_freq: 30     # new noise every 30 steps (1 s)
+squash_output: true
+log_std_init: -2.0      # gSDE scale: the noise matrix std, not the action std
+mean_penalty: 0.05      # per unit^2 of pre-tanh mean past the margin, summed over actions
+mean_margin: 1.5        # tanh(1.5) = 0.91
+
+normalize_reward: true
+
+eval_every_steps: 500000
+eval_episodes: 20
+video_every_steps: 2000000
+video_episodes: 2
+checkpoint_every_steps: 500000
+run_dir: runs
