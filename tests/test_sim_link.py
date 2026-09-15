@@ -123,13 +123,39 @@ def test_encoder_equipped_car_reports_real_speed():
     assert t.speed_mps == pytest.approx(link.env.car.state.speed, abs=1e-3)
 
 
+def assert_reports_the_held_readings(link: SimEsp32, t: Telemetry) -> None:
+    """Each present sensor's frame value is the reading the observation was built from, or the
+    no-echo sentinel when that ping heard nothing."""
+    _, held = link.env.readings
+    for name, value, echo in zip(link.env.ultra.names, held, link.env.ultra.echo, strict=True):
+        assert getattr(t, f"us_{name}_m") == (round(float(value), 3) if echo else NO_READING)
+
+
 def test_three_sensor_build_reports_a_sentinel_for_the_missing_front():
     link = make_link(n_ultrasonic=3)
     drive(link, 0, 0.0, 0.5, 5)
     t = decode_telemetry(link.readline())
     assert t.us_front_m == NO_READING
     assert t.flags & FLAG_US_TIMEOUT
-    assert t.us_left_m >= 0.0 and t.us_right_m >= 0.0 and t.us_back_m >= 0.0
+    assert_reports_the_held_readings(link, t)
+
+
+def test_telemetry_reports_the_noisy_held_readings_the_policy_saw():
+    """Not the true ranges. The firmware reports each sensor's last ping, noise included, stale
+    until its round-robin turn comes back, and the policy trained on exactly those values."""
+    env = CarEnv(EnvConfig(max_steps=2000))  # randomization on: noise, dropout, ping rate
+    env.reset(seed=3)
+    link = SimEsp32(env)
+    off_truth = 0
+    for i in range(60):
+        link.write(encode_command(Command(i, 0.0, 0.3)))
+        link.step()
+        t = decode_telemetry(link.readline())
+        assert_reports_the_held_readings(link, t)
+        truth = env.ultra.true_ranges(env.world, env.car.state)
+        off_truth += any(abs(v - r) > 0.005 for v, r in zip(t.ultrasonics(), truth, strict=True)
+                         if v != NO_READING)
+    assert off_truth > 0
 
 
 def test_steering_degrees_are_clamped_to_the_mechanical_limit():

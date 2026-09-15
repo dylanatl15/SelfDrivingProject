@@ -103,8 +103,11 @@ For each sensor in the latest `$T` frame, with `d` its value in metres:
 - **Skip** it if `d` is `-1.000` (no echo) or `d ≥ 4.0`.
 - **Skip** it if `d` is identical to that sensor's value in the previous `$T` frame. A
   sensor waiting for its round-robin turn repeats its last reading. Occasionally a
-  genuinely new ping repeats the same millimetre too. Skipping it loses nothing, because
-  the earlier point is still stored.
+  genuinely new ping repeats the same millimetre too, and it is skipped as well. If the car
+  has moved since the earlier reading, that point is lost, where the simulator stores it.
+  Together with millimetre rounding, that made the phone's ring differ from the
+  simulator's on about 3 % of steps, and the phone still drove as well
+  ([`phone-loop.md`](phone-loop.md)).
 - Otherwise transform with the **current** pose and stamp it `now`:
 
   | Sensor | Mount (forward, left) | Direction `a` |

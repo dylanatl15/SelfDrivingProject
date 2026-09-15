@@ -124,6 +124,6 @@ src/selfdrive/
   train/     PPO entry point, callbacks, vec env factory, benchmark
   eval/      rollouts and the adversarial scenario suite
   export/    ONNX export for the phone
-  link/      serial codec + simulated ESP32
+  link/      serial codec, simulated ESP32, the phone's reference loop and its check
 tests/
 ```

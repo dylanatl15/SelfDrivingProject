@@ -50,6 +50,7 @@ class SimEsp32:
         self._since_command_ms = 0.0
         self._failsafe = True  # nothing has been commanded yet
         self._last_info: dict = {}
+        self.obs: np.ndarray | None = None  # what CarEnv built for the policy after the last step
         self._terminated = False
         self._truncated = False
 
@@ -92,16 +93,19 @@ class SimEsp32:
         action[STEER] = steer_norm
         action[THROTTLE] = float(np.clip(throttle, -1.0, 1.0))
 
-        _, _, terminated, truncated, info = self.env.step(action)
+        self.obs, _, terminated, truncated, info = self.env.step(action)
         self._last_info = info
         self._terminated, self._truncated = terminated, truncated
         return terminated, truncated
 
     def telemetry(self) -> Telemetry:
         s = self.env.car.state
-        ultra = self.env.ultra.true_ranges(self.env.world, s)
-        names = self.env.ultra.names
-        by_name = dict(zip(names, ultra, strict=True))
+        # The round-robin's held values, noise and staleness included, because that is what the
+        # firmware reports and what the policy trained on. A ping that heard nothing reports the
+        # no-echo sentinel, as docs/protocol.md requires.
+        _, ultra = self.env.readings
+        heard = np.where(self.env.ultra.echo, ultra, NO_READING)
+        by_name = dict(zip(self.env.ultra.names, heard, strict=True))
         # A 3-sensor build genuinely has no front reading; report the sentinel rather
         # than inventing a number the real car cannot produce.
         readings = [by_name.get(n, NO_READING) for n in ("front", "left", "right", "back")]
@@ -124,6 +128,11 @@ class SimEsp32:
             us_back_m=float(readings[3]),
             flags=flags,
         )
+
+    @property
+    def last_info(self) -> dict:
+        """The environment's info dict from the last step, episode metrics included at the end."""
+        return self._last_info
 
     @property
     def failsafe_active(self) -> bool:

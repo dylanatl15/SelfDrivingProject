@@ -54,7 +54,9 @@ Retrain after narrowing. Expect better final performance than the wide-band poli
 1. Measure the chassis, update `configs/env_phase1.yaml`, retrain, check the scenario suite.
 2. Export to ONNX, run it on the phone against `SimEsp32` over the real protocol
    (`src/selfdrive/link/sim_link.py`) — this catches unit, sign and field-order bugs on a
-   desk instead of on a moving car.
+   desk instead of on a moving car. [`phone-loop.md`](phone-loop.md) gives the phone's side
+   of that loop step by step, with a reference implementation that drove the simulator as
+   well as the exam did.
 3. Only then put it on the real chassis, on a **tether or with a kill switch**, in an open
    space, at reduced `max_speed_fwd`.
 
