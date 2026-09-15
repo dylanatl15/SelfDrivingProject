@@ -62,7 +62,10 @@ about 3 cm of error per square-root metre driven, plus 0.5 s tracking outages. T
 is therefore trained to tolerate ARCore's normal drift. It is not trained on relocalization
 jumps, where the pose snaps by tens of centimetres. Expect a brief swerve after one.
 
-While tracking is lost, keep sending the last block you computed. When no goal is set, the
+While tracking is lost, keep sending the last block you computed. The simulator does not hold
+it: it keeps updating the block, and the patience clock's range, from dead reckoning. In the
+phone check the two differed on 1-4 % of steps, and the phone still drove as well
+([`phone-loop.md`](phone-loop.md)), so keep the rule. When no goal is set, the
 simulator sends `[1, 0, 1]`, a far goal dead ahead, so the car drives forward. The app
 should stop the car instead.
 

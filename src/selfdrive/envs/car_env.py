@@ -410,6 +410,7 @@ class CarEnv(gym.Env):
         if shielded is not None:
             info["shield"] = shielded
             info["throttle_sent"] = float(action[THROTTLE])
+            info["steer_sent"] = float(action[STEER])
         if terminated or truncated:
             info["episode_metrics"] = self._summary(truncated)
         return obs, float(reward), terminated, truncated, info
@@ -457,6 +458,13 @@ class CarEnv(gym.Env):
         action = action.copy()
         action[STEER], action[THROTTLE] = steer, throttle
         return action, did
+
+    @property
+    def readings(self) -> tuple[np.ndarray, np.ndarray]:
+        """The depth buckets and ultrasonic ranges, in metres, that the latest observation was
+        built from: the values the phone holds when the policy answers. Ultrasonics are in
+        `ultra.names` order, before a 3-sensor build pads its missing slot."""
+        return self._depth_seen.copy(), self._ultra_seen.copy()
 
     # --- rendering -----------------------------------------------------------
 
