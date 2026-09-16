@@ -15,6 +15,7 @@ keeps nothing.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Any, Protocol
 
@@ -95,15 +96,17 @@ def run_episodes(
     deterministic: bool = True,
     render: bool = False,
     frame_sink: list | None = None,
+    options: Callable[[int], dict] | None = None,
 ) -> EvalResult:
     """Roll out `n_episodes` and summarize. Seeds are consecutive from `seed`, so the
     same call reproduces the same arenas - which is what makes two checkpoints
-    comparable."""
+    comparable. `options(i)` pins episode `i`'s arena and start pose, as the hand-built
+    showcase arenas do (`eval/arenas.py`); without it each episode draws its own."""
     rows: list[dict[str, float]] = []
     returns: list[float] = []
 
     for i in range(n_episodes):
-        obs, _ = env.reset(seed=seed + i)
+        obs, _ = env.reset(seed=seed + i, options=options(i) if options else None)
         total = 0.0
         metrics: dict[str, float] = {}
         while True:
@@ -181,6 +184,9 @@ def main(argv=None) -> None:
     p.add_argument("--scenarios", action="store_true",
                    help="run the adversarial suite instead of random arenas")
     p.add_argument("--video", default=None, help="write an mp4 here (implies rgb_array)")
+    p.add_argument("--arena", default=None,
+                   help="show off on a hand-built arena instead of random ones: a name from "
+                        "eval/arenas.py, or 'all' to cycle through them")
     args = p.parse_args(argv)
 
     policy = _load_policy(args.model, args.seed)
@@ -194,9 +200,14 @@ def main(argv=None) -> None:
     mode = "rgb_array" if args.video else args.render
     env = CarEnv(load_env_config(args.config), render_mode=mode)
     frames: list = [] if args.video else None
+    options = None
+    if args.arena:
+        from .arenas import arena_cycle
+
+        options = arena_cycle(args.arena)
     result = run_episodes(
         policy, env, args.episodes, seed=args.seed, deterministic=True,
-        render=mode is not None, frame_sink=frames,
+        render=mode is not None, frame_sink=frames, options=options,
     )
     print(result)
 
