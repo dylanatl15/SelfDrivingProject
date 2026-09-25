@@ -435,7 +435,7 @@ class ScriptedEnv:
     def __init__(self, outcomes):
         self.outcomes = list(outcomes)
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
         return np.zeros(2, np.float32), {}
 
     def step(self, action):
