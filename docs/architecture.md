@@ -21,11 +21,37 @@ The split is deliberate: the phone emits **geometric intent** (an angle and a th
 fraction), and the ESP32 owns everything electrical. Retuning the chassis — a different
 servo, a different gear ratio — does not require retraining the policy.
 
-## Why the phone is the compute node
+## Compute: the phone now, a depth camera and a single-board computer next
 
-It already has the camera, an accelerator, ARCore's depth-from-motion, GPS for Phase 2,
-and a battery. Adding a Jetson or a Pi plus a camera plus a depth pipeline would cost
-more, weigh more, and do less.
+Everything trained so far assumes the phone. It already has the camera, an accelerator,
+ARCore's depth-from-motion, GPS for Phase 2, and a battery, so the first build needed no
+second computer at all. That was largely a cost argument, and as of September 2026 it no
+longer holds the way it did: a Raspberry Pi 5 8 GB is $175 and the 16 GB is $305, against
+$95 and $120 in early 2025, because LPDDR4 is being bid away by AI datacentre demand.
+
+So the reasons to move are not price. They are:
+
+- **A depth camera measures instead of inferring.** Motion stereo degrades exactly when
+  the car stops, which is when it must decide to reverse. Active stereo or ToF does not.
+- **Phase 3 has to aim the sensor.** A pan-tilt head carrying a 60 g camera is a servo
+  and a bracket. A pan-tilt head swinging a phone is a different mechanical problem.
+- **It reads as an engineering platform rather than a phone taped to a car** — which
+  matters for a senior project and for the sponsors being asked to supply the parts.
+
+[`hardware-bom.md`](hardware-bom.md) lists the candidate parts and what they cost.
+
+### What the move costs
+
+| Piece | Effect |
+|---|---|
+| Protocol v1 frames | **unchanged.** Same ASCII lines, same CRC8, same 200 ms failsafe. The *host* stops being the phone and becomes the SBC, which is a v2 edit to the transport table, not to the codec. |
+| `ObsConfig`, observation layout | **changed.** A different FOV and a different confidence signal mean new normalization constants, so every existing checkpoint is invalidated and the Android mirror is replaced by a host-side one. |
+| Reward, exams, shield, showcase arenas | **unchanged.** All geometry, none of it sensor-specific. |
+| Odometry | **source changes, model survives.** ARCore's pose gives way to wheel encoders plus an IMU, or the camera's own VIO. The policy was trained against a pose drifting as `sqrt(distance travelled)`, and encoder-plus-IMU odometry drifts the same way, so this sits inside what it already handles. |
+
+The retrain is cheap in a way it was not in July: the reward-ordering tests, the Stage 1
+and Stage 2 exams, the speed shield and the six showcase arenas all exist already. A new
+sensor is a new `depth:` block and a training run, not a new research problem.
 
 ## Software flow, one control step
 

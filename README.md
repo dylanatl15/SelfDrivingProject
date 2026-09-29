@@ -204,6 +204,14 @@ runs stay byte-reproducible (`tests/test_determinism.py` guards exactly this).
    round-robin at roughly 15–25 Hz total against a 30 Hz policy, so most telemetry frames
    repeat a stale reading. The simulator models the staleness instead of hiding it.
 
+Facts 1 and 2 are properties of the phone, which is the *first* hardware generation. A
+depth camera on a single-board computer is planned to replace it — better close-range
+measurement, and a sensor light enough for the Phase 3 pan-tilt head.
+[`docs/hardware-bom.md`](docs/hardware-bom.md) has the parts and
+[`docs/architecture.md`](docs/architecture.md#what-the-move-costs) has what it costs the
+software: new normalization constants and a retrain, but the reward, the exams, the shield
+and the protocol frames all survive untouched.
+
 ---
 
 ## What training actually taught us
@@ -260,6 +268,7 @@ LiPo-powered car driving at a wall, or at a person.
 | [`shield.md`](docs/shield.md) | the speed cap and back-out rule that wrap the policy |
 | [`sim2real.md`](docs/sim2real.md) | what to measure on the real chassis, and in what order |
 | [`architecture.md`](docs/architecture.md) | how the simulator fits together |
+| [`hardware-bom.md`](docs/hardware-bom.md) | candidate parts, checked prices, and the planned sensor swap |
 
 `link/sim_link.py` lets a real phone drive the *simulator* over the *real* protocol, so a
 hardware-in-the-loop demo — real phone, real ARCore, real policy, real serial frames,
