@@ -11,7 +11,7 @@ it. The other half — Android app, ESP32 firmware, chassis — is built by team
 [`docs/protocol.md`](docs/protocol.md), which is frozen so that both halves can be written
 at the same time.
 
-Python 3.12 · PPO (Stable-Baselines3) · Gymnasium · vectorized NumPy geometry · 400 tests
+Python 3.12 · PPO (Stable-Baselines3) · Gymnasium · vectorized NumPy geometry · 412 tests
 
 ---
 
@@ -207,7 +207,8 @@ runs stay byte-reproducible (`tests/test_determinism.py` guards exactly this).
 Facts 1 and 2 are properties of the phone, which is the *first* hardware generation. A
 depth camera on a single-board computer is planned to replace it — better close-range
 measurement, and a sensor light enough for the Phase 3 pan-tilt head.
-[`docs/hardware-bom.md`](docs/hardware-bom.md) has the parts and
+[`docs/hardware-bom.md`](docs/hardware-bom.md) has the parts, [`web/sponsor/`](web/sponsor/README.md)
+turns that list into the public page sponsors read, and
 [`docs/architecture.md`](docs/architecture.md#what-the-move-costs) has what it costs the
 software: new normalization constants and a retrain, but the reward, the exams, the shield
 and the protocol frames all survive untouched.
@@ -269,6 +270,7 @@ LiPo-powered car driving at a wall, or at a person.
 | [`sim2real.md`](docs/sim2real.md) | what to measure on the real chassis, and in what order |
 | [`architecture.md`](docs/architecture.md) | how the simulator fits together |
 | [`hardware-bom.md`](docs/hardware-bom.md) | candidate parts, checked prices, and the planned sensor swap |
+| [`web/sponsor/`](web/sponsor/README.md) | the public parts page built from that list, and its publishing rules |
 
 `link/sim_link.py` lets a real phone drive the *simulator* over the *real* protocol, so a
 hardware-in-the-loop demo — real phone, real ARCore, real policy, real serial frames,
@@ -294,8 +296,10 @@ src/selfdrive/
                   demo recorder
   export/         self-contained ONNX export for the phone
   link/           serial codec, simulated ESP32, and the phone-side reference loop
-tests/            400 tests across 22 files
+  web/            generator for the public sponsor page
+tests/            412 tests across 23 files
 media/            the demo reel
+web/sponsor/      parts.yaml, nginx config and Dockerfile behind sponsor.dylantamayo.dev
 ```
 
 ---

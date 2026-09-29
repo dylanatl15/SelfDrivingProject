@@ -223,7 +223,7 @@ camera says yes first.
 ## Notes for whoever writes the emails
 
 - **Lead with the repository and the video.** `github.com/dylanatl15/SelfDrivingProject` is
-  public, has 400 tests and a demo reel at `media/demo.mp4`. A working artifact opens doors
+  public, has 412 tests and a demo reel at `media/demo.mp4`. A working artifact opens doors
   that a description of intent does not.
 - **One item per email**, with the option list attached as "any of these would work." It
   costs the vendor nothing to pick the cheapest thing on their shelf, and it raises the

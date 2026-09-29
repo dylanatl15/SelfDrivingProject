@@ -1,0 +1,347 @@
+# Single source of truth for the public sponsor page (sponsor.dylantamayo.dev).
+#
+# Edit this file, re-run `python -m selfdrive.web.sponsor`, rebuild the container.
+# Git history of this file is the audit trail: who offered what, when.
+#
+# `state` is the TRUE state and is for the team. The page shows only three of them:
+#
+#   needed / asked / declined / no_reply  ->  "Still needed"   (public, indistinguishable)
+#   pledged                              ->  "Pledged"        (public, with `by`)
+#   received                             ->  "Received"       (public, with `by`)
+#   covered                              ->  listed under "Already covered", never as an ask
+#
+# Never publish a declined or ignored vendor. `asked`, `declined` and `no_reply` all read as
+# "still needed" on the page, so the team can track cold asks here without naming anyone.
+#
+# Prices are quoted from the vendor's own store on the date in `meta.prices_checked`.
+# `verified: false` marks a figure nobody has checked. Do not quote one in an email.
+
+meta:
+  title: Self-Driving Scale Car
+  tagline: A 1/10-scale car that teaches itself to drive, and the parts list that would let us build it.
+  prices_checked: 2026-09-29
+  contact: contact.dylantamayo@gmail.com
+  repo: https://github.com/dylanatl15/SelfDrivingProject
+  portfolio: https://dylantamayo.dev
+  bom: https://github.com/dylanatl15/SelfDrivingProject/blob/main/docs/hardware-bom.md
+  course: Senior capstone project, BS Computer Science
+  deadline: First week of December 2026
+
+# Short, checkable claims. Numbers only, no adjectives.
+status:
+  - Simulator and reinforcement-learning stack are built, tested and public - 412 unit tests.
+  - Policies train on 20 parallel workers and are scored on 100 held-out arenas they never saw.
+  - Best policy reaches 2.3 waypoints per 50 s run on unseen arenas and covers 19.1 m² of new ground.
+  - It still crashes on 17 % of those held-out runs. That number is going down and we publish it.
+  - What does not exist yet is the car. Every line below is a part we do not have.
+
+groups:
+  - name: Sensing
+    blurb: >-
+      The car has to measure distance, not guess it. The simulator already models a forward
+      depth arc plus four rangefinders, so any of these drop into a configuration file.
+    items:
+      - part: Depth camera or 360 laser scanner
+        qty: 1
+        why: >-
+          The main sensor. Today a phone infers depth from its own motion, which fails exactly
+          when the car stops - which is when it has to decide to reverse. A depth camera or a
+          laser scanner measures instead.
+        spec: >-
+          60-125 degree horizontal field of view, or a 360 degree planar scan. Range to 4 m is
+          enough. On-device inference is a bonus, not a requirement.
+        state: needed
+        options:
+          - name: Luxonis OAK-D S2
+            price: $329
+            url: https://shop.luxonis.com/collections/oak-cameras-1
+            note: Best fit - 69 degrees is exactly what the policy already trained on, and it runs the network on-camera.
+          - name: Luxonis OAK-D Lite
+            price: $269
+            url: https://shop.luxonis.com/collections/oak-cameras-1
+            note: Cheapest camera that still runs the network on-device.
+          - name: Intel RealSense D435i
+            price: $334
+            url: https://store.intelrealsense.com/buy-intel-realsense-depth-camera-d435i.html
+            note: Built-in IMU, which covers the pose sensor line below by itself.
+          - name: Orbbec Gemini 335
+            price: $264
+            url: https://store.orbbec.com/products/gemini-335
+            note: Cheapest name-brand active stereo.
+          - name: Slamtec RPLIDAR C1
+            price: $72
+            url: https://www.robotshop.com/products/slamtec-rplidar-c1-360-dtof-laser-scanner
+            note: >-
+              Not a camera - a 360 degree laser scan, 12 m. Cheapest option on this page and
+              arguably the best sensor: it removes the rear blind spot the car currently reverses into.
+          - name: Arducam ToF camera for Raspberry Pi
+            price: ~$50
+            url: https://docs.arducam.com/Raspberry-Pi-Camera/Tof-camera/TOF-Camera/
+            note: Ribbon-cable native to the Pi. The budget path.
+
+      - part: Short-range rangefinders
+        qty: 4
+        why: >-
+          They cover the corners the camera cannot see. Four exactly - the serial protocol the
+          firmware is already written against has four fields for them, so four of any technology
+          keeps that work intact.
+        spec: Range to 2 m or more, 10 Hz or faster, I2C or a trigger/echo pair.
+        state: needed
+        options:
+          - name: Adafruit VL53L1X time-of-flight breakout
+            price: $14.95 each
+            url: https://www.adafruit.com/product/3967
+            note: >-
+              Laser, 4 m, no cross-talk. Strictly better than the cheap ultrasonics the simulator
+              models, so it can only help.
+          - name: Pololu VL53L1X carrier
+            price: $22.95 each
+            url: https://www.pololu.com/product/3415
+            note: Onboard regulator, more rugged.
+          - name: HC-SR04 ultrasonic
+            price: ~$2 each
+            verified: false
+            note: What the simulator models today. Entirely adequate.
+
+      - part: Orientation sensor
+        qty: 1
+        why: >-
+          The car remembers where obstacles were for three seconds after they leave view, and it
+          needs to know how far it has turned to place those memories. A phone provides this today.
+        spec: 9-DOF, orientation output on-chip preferred so the computer does no filtering.
+        state: needed
+        options:
+          - name: Adafruit BNO085 9-DOF IMU
+            price: $29.50
+            url: https://www.adafruit.com/product/4754
+            note: Fuses on-chip and outputs orientation directly.
+          - name: Covered by a RealSense D435i
+            price: $0
+            note: If the camera above lands with an IMU in it, this line disappears.
+
+      # Phase 2 of three. Not needed for the December demo, needed for the finished project.
+      - part: GPS receiver
+        qty: 1
+        why: Phase 2 of the project drives to dropped map pins outdoors.
+        spec: Serial NMEA is enough. Centimetre-accurate RTK would let us do far more.
+        state: needed
+        options:
+          - name: SparkFun u-blox NEO-M9N
+            price: $70.95
+            url: https://www.sparkfun.com/sparkfun-gps-breakout-neo-m9n-u-fl-qwiic.html
+          - name: SparkFun ZED-F9P RTK
+            price: $259.95
+            url: https://www.sparkfun.com/sparkfun-gps-rtk-sma-breakout-zed-f9p-qwiic.html
+            note: A stretch ask, but a real one - centimetre waypoints change what Phase 2 can be.
+
+  - name: Computing
+    blurb: >-
+      One small computer to run the trained network and talk to the motor controller, one
+      microcontroller to own everything electrical. The split is deliberate: swapping a motor
+      never means retraining the network.
+    items:
+      - part: Single-board computer
+        qty: 1
+        why: Runs the trained policy and bridges the camera to the microcontroller.
+        spec: >-
+          A Raspberry Pi 5 is the target. 4 GB is enough if the camera or scanner does its own
+          inference; 8 GB plus an AI accelerator is needed if it does not.
+        note: >-
+          This is the line the 2026 memory shortage hit hardest. A Pi 5 16 GB was $120 at launch
+          and is $305 today, because LPDDR4 is being bought up by AI datacentres. It is why we
+          are asking rather than buying.
+        state: needed
+        options:
+          - name: Raspberry Pi 5, 4 GB
+            price: $110
+            url: https://www.pishop.us/product/raspberry-pi-5-4gb/
+          - name: Raspberry Pi 5, 8 GB
+            price: $175
+            url: https://www.pishop.us/product/raspberry-pi-5-8gb/
+            note: The comfortable choice.
+          - name: Raspberry Pi AI HAT+, 13 TOPS
+            price: from $70
+            url: https://www.raspberrypi.com/products/ai-hat/
+            note: Needed only if the camera does not run the network itself.
+          - name: NVIDIA Jetson Orin Nano Super
+            price: $399
+            url: https://marketplace.nvidia.com/en-us/enterprise/robotics-edge/jetson-orin-nano-super-developer-kit/
+            note: Opens up the widest-angle cameras, which need CUDA.
+
+      - part: Microcontroller board
+        qty: 2
+        why: >-
+          Owns the motor, the servo and the rangefinders, and cuts the motor if it stops hearing
+          from the computer for 200 ms. Two because one will get destroyed.
+        spec: ESP32-S3 with native USB, so it presents as a clean serial device with no bridge chip.
+        state: needed
+        options:
+          - name: Espressif ESP32-S3-DevKitC-1-N8R8
+            price: $15
+            url: https://www.mouser.com/en/ProductDetail/Espressif-Systems/ESP32-S3-DevKitC-1-N8R8
+          - name: Adafruit ESP32-S3 DevKitC
+            price: $19.95
+            url: https://www.adafruit.com/product/5364
+
+      - part: Cooling, power supply and storage for the computer
+        qty: 1
+        why: >-
+          A Pi 5 throttles itself without a fan, and a memory card will not survive the logging
+          this project does.
+        spec: Active cooler, 27 W USB-C supply, and an SSD with the adapter to mount it.
+        state: needed
+        options:
+          - name: Active cooler + 27 W PSU + NVMe adapter + SSD
+            price: ~$75 for the set
+            verified: false
+
+  - name: Chassis and drive
+    blurb: >-
+      A 1/10-scale car that steers with a servo at the front and drives from the rear - the
+      geometry the simulator models. One mechanical detail matters more than it sounds.
+    items:
+      - part: 1/10-scale steering chassis
+        qty: 1
+        why: The car. Front-wheel steering, rear-wheel drive, roughly 40 cm long.
+        spec: Wheelbase near 0.25 m, length near 0.40 m, width near 0.20 m. Smaller is fine - we re-measure and retrain.
+        state: needed
+        options:
+          - name: Hiwonder Ackermann metal chassis
+            price: $49.99
+            url: https://www.hiwonder.com/products/ackermann-steering-chassis
+            note: Best value by a wide margin - includes encoder motors and the steering servo, covering three lines at once.
+          - name: Tamiya TT-02R 4x4 chassis kit
+            price: $157.50
+            url: https://www.towerhobbies.com/product/110-tt-02r-4x4-chassis-kit/TAM47326.html
+            note: Cheapest true 1/10 kit. Assembling it ourselves is a feature, not a cost.
+          - name: Traxxas Slash 4X4 VXL
+            price: $429.95
+            url: https://traxxas.com/slash-4x4-vxl-68386-4
+            note: The platform MIT's RACECAR and the F1TENTH racing series are built on.
+
+      - part: Steering servo
+        qty: 1
+        why: Turns the front wheels. The simulator models its speed limit, so the real one has to keep up.
+        spec: At least 28 degrees each way, at least 200 degrees per second. Most hobby servos beat that threefold.
+        state: needed
+        options:
+          - name: Savox SC-1251MG
+            price: $69-81
+            url: https://www.whiterosehobbies.com/products/savox-1251mg-low-profile-servo-09-125-at-6-0v
+            note: 9 kg-cm, about 667 degrees per second.
+          - name: Power HD 1501MG
+            price: ~$20
+            verified: false
+            note: Budget, still far past the requirement.
+          - name: Included with the Hiwonder chassis
+            price: $0
+            note: If that chassis lands, this line disappears.
+
+      - part: Drive motor and speed controller
+        qty: 1
+        why: Drives the rear wheels.
+        spec: >-
+          Brushed, or sensored brushless. This is the one non-obvious spec on the page: the policy
+          tops out at 1.5 m/s, a crawl by hobby standards, and sensorless brushless motors cog and
+          stutter down there. Sensored also gives us wheel speed for free, which the safety layer
+          reads on every step.
+        state: needed
+        options:
+          - name: Hobbywing QuicRun 1060 brushed controller
+            price: $23.99
+            url: https://www.hobbywingdirect.com/products/quicrun-10-brushed-esc
+            note: Smooth at low speed. Pairs with any 27-turn brushed motor.
+          - name: Hobbywing QuicRun 10BL120 G2 sensored combo with motor
+            price: $99.99
+            url: https://www.amainhobbies.com/hobbywing-quicrun-10bl120-g2-sensored-brushless-esc-combo-w-3650-sl-g2-motor-hwa38020381/p1564886
+            note: Sensored, so the wheel encoder comes free.
+          - name: Included with the Hiwonder chassis
+            price: $0
+            note: Encoder motors already in the box.
+
+  - name: Power and safety
+    blurb: >-
+      A battery-powered car that drives itself needs a way for a human to stop it. That is not
+      optional and it is in our written procedure before the first real drive.
+    items:
+      - part: Battery packs and a charger
+        qty: 3 packs, 1 charger
+        why: Three packs so testing does not stop to recharge.
+        spec: 2S 5000 mAh hard-case, and a balance charger that handles them.
+        state: needed
+        options:
+          - name: Gens Ace 2S 5000 mAh hard-case
+            price: $40-53 each
+            url: https://www.buddyrc.com/collections/gens-ace-batteries
+          - name: SkyRC B6Neo balance charger
+            price: $35
+            url: https://www.amazon.com/clp/B0CCT2WGNS
+
+      - part: 5 V regulator, 5 A
+        qty: 1
+        why: >-
+          The computer cannot run off the motor controller's small supply - a steering peak browns
+          it out and reboots the computer mid-drive. Separate rails.
+        spec: 5 V at 5 A continuous from a 2S pack.
+        state: needed
+        options:
+          - name: Pololu D24V50F5
+            price: $32.95
+            url: https://www.pololu.com/product/2851
+
+      - part: Radio transmitter, receiver and a hard kill switch
+        qty: 1
+        why: A human override that does not depend on any of the software above working.
+        spec: Any 6-channel hobby radio, plus a switch that physically opens the motor circuit.
+        state: needed
+        options:
+          - name: FlySky FS-i6X with iA6B receiver
+            price: $53-70
+            url: https://www.hobbytown.com/flysky-i6x-6channel-afhds-2a-air-radio-system-w-ia6b-receiver-fsy-i6xia6b/p1674181
+          - name: High-current slide switch
+            price: ~$8
+            verified: false
+
+  - name: Phase 3, a stretch ask
+    blurb: >-
+      The last phase puts the camera on a head that can look around. The servo has to report the
+      angle it is actually at, because that angle becomes part of what the network sees - and an
+      ordinary hobby servo cannot report anything.
+    items:
+      - part: Servo with position feedback
+        qty: 2
+        why: Pan and tilt for a camera head that looks where the car is about to go.
+        spec: Serial bus servo reporting position. Two, for two axes.
+        state: needed
+        options:
+          - name: ROBOTIS Dynamixel XL330-M288-T
+            price: $23.90-27.49
+            url: https://www.robotis.us/dynamixel-xl330-m288-t/
+            note: Reports position, speed, current and temperature. Exactly what the observation needs.
+          - name: Feetech STS3215 serial bus servo
+            price: $29-39
+            url: https://www.amazon.com/RCmall-Continuous-Programmable-SO-ARM100-Controller/dp/B0F87XY6F2
+            note: Magnetic encoder, same idea, much more torque.
+
+# Rendered as "Already covered - please do not send these". Keeps the ask honest and small.
+covered:
+  - part: 3D printing and filament
+    note: A team member owns a printer. Brackets, mounts and the sensor ring are made in-house.
+  - part: A phone
+    note: >-
+      The current build uses a phone we already own as the camera. Either it stays, or the depth
+      camera above replaces it. Neither case needs a donated phone.
+  - part: Training hardware and software
+    note: >-
+      The simulator, the training runs and this website all run on a workstation we already have.
+      Every line of the software is written and public.
+  - part: Wiring, connectors and fasteners
+    note: Cheap, and easier for us to buy locally than for anyone to ship.
+
+# What we can actually offer. Promise nothing that is not in our control.
+sponsor_gets:
+  - Your name and logo on this page, on the project poster, and in the final written report.
+  - A credit in the demo video, which is the first thing anyone sees on this page.
+  - Photographs of your part on the finished car, and the measured results it produced.
+  - An honest public writeup either way. If a part does not work for us, we say why, and we say it about the design, not about you.
+  - Everything is open source under one repository, so the work your part enabled stays readable and citable.

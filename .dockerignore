@@ -1,0 +1,13 @@
+# Only used by web/sponsor/Dockerfile, whose build context is the repository root.
+# runs/ alone is gigabytes of checkpoints; sending it to the daemon would be absurd.
+.git
+.venv
+.worktrees
+runs
+media/*
+!media/demo.gif
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+web/sponsor/dist
