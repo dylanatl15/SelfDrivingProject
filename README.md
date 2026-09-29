@@ -15,6 +15,29 @@ Python 3.12 · PPO (Stable-Baselines3) · Gymnasium · vectorized NumPy geometry
 
 ---
 
+## Watch it drive
+
+![A trained policy driving the campus_path showcase arena](media/demo.gif)
+
+The Stage 2 policy (`waypoint_s2_patience_seed1`, 9.5M steps) with the speed shield and the
+back-out reflex on, in one of the six hand-built showcase arenas
+([`eval/arenas.py`](src/selfdrive/eval/arenas.py)). The gold ring is the true waypoint and
+the cross is where the car *believes* it is, from drifting odometry. The ground underneath
+is floor already driven, tinted by speed and fading over 8 s.
+
+Full reel, two minutes over all six arenas: **[`media/demo.mp4`](media/demo.mp4)**. Six 20 s
+episodes from seed 4,000,000 on the exam environment
+([`configs/env_waypoint_demo.yaml`](configs/env_waypoint_demo.yaml)): 11 waypoints reached,
+no collisions, never stuck. That is one good run per arena and not the average — over 100
+held-out seeds the same policy crashes on 17 % of episodes. Record your own:
+
+```bash
+python -m selfdrive.eval.record --model runs/<run>/checkpoints/<ckpt>.zip \
+  --config configs/env_waypoint_demo.yaml --arena all --seconds 20 --out media/demo.mp4
+```
+
+---
+
 ## Where the project is
 
 | Phase | Goal | Status |
@@ -247,7 +270,7 @@ simulated car — works even if the chassis slips.
 ## Layout
 
 ```
-configs/          30 YAMLs: car, sensors, arenas, domain randomization, PPO hyperparameters
+configs/          31 YAMLs: car, sensors, arenas, domain randomization, PPO hyperparameters
 docs/             the frozen protocol and the port guides above
 src/selfdrive/
   world/          vectorized ray casting, collision, arena generators, navigation raster,
@@ -258,10 +281,12 @@ src/selfdrive/
                   speed shield, domain randomization
   render/         pygame viewport (never imported by a training worker)
   train/          PPO entry point, callbacks, vec env factory, benchmark
-  eval/           rollouts, adversarial scenarios, six hand-built showcase arenas
+  eval/           rollouts, adversarial scenarios, six hand-built showcase arenas,
+                  demo recorder
   export/         self-contained ONNX export for the phone
   link/           serial codec, simulated ESP32, and the phone-side reference loop
 tests/            400 tests across 22 files
+media/            the demo reel
 ```
 
 ---

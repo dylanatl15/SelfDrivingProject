@@ -199,7 +199,14 @@ def main(argv=None) -> None:
 
     mode = "rgb_array" if args.video else args.render
     env = CarEnv(load_env_config(args.config), render_mode=mode)
-    frames: list = [] if args.video else None
+    frames = writer = None
+    if args.video:
+        import imageio.v2 as imageio
+
+        from .record import StreamSink  # lazy: record imports from this module
+
+        writer = imageio.get_writer(args.video, fps=30, macro_block_size=1)
+        frames = StreamSink(writer)
     options = None
     if args.arena:
         from .arenas import arena_cycle
@@ -211,11 +218,9 @@ def main(argv=None) -> None:
     )
     print(result)
 
-    if args.video and frames:
-        import imageio.v2 as imageio
-
-        imageio.mimsave(args.video, frames, fps=30, macro_block_size=1)
-        print(f"wrote {args.video} ({len(frames)} frames)")
+    if writer is not None:
+        writer.close()
+        print(f"wrote {args.video} ({frames.n} frames)")
     env.close()
 
 

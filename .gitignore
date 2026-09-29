@@ -15,3 +15,7 @@ videos/
 *.pkl
 *.csv
 *.mp4
+
+# ...except the demo reel, which is checked in on purpose: it is what a visitor watches
+# first, and a sponsorship packet links it.
+!media/*.mp4
