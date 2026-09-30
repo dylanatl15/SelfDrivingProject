@@ -329,15 +329,32 @@ class PygameView:
         if goals is not None:
             lines.append(f"goals {goals.reached:2d}   to goal {goals.remaining:5.1f} m path   "
                          f"progress {goals.progress_m:+6.1f} m")
+        self._panel(lines, 10)
         for i, text in enumerate(lines):
             warn = ("stalled" in text and env.reward_fn.stalled_steps > 0) or "LOST" in text
             colour = WARN if warn else TEXT
             self.screen.blit(self.font.render(text, True, colour), (12, 10 + i * 18))
 
         overlay = env.hud_overlay
+        if overlay:
+            self._panel(overlay, self.size[1] - 10 - len(overlay) * 18)
         for i, text in enumerate(overlay):
             y = self.size[1] - 10 - (len(overlay) - i) * 18
             self.screen.blit(self.font.render(text, True, TEXT), (12, y))
+
+    def _panel(self, lines, top: int) -> None:
+        """Dim the wall lines running underneath a block of HUD text.
+
+        Without this the readout is drawn straight onto the arena, and a white wall
+        crossing behind a row of numbers makes it unreadable - on screen, and worse in a
+        recording, where a viewer cannot nudge the camera to get the text off the wall.
+        """
+        pg = self.pygame
+        width = max(self.font.size(t)[0] for t in lines) + 16
+        height = len(lines) * 18 + 8
+        panel = pg.Surface((width, height), pg.SRCALPHA)
+        panel.fill((6, 8, 14, 208))
+        self.screen.blit(panel, (4, top - 4))
 
     def close(self):
         self.pygame.display.quit()

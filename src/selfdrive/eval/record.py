@@ -48,6 +48,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--arena", default="all", help="one arena name, or 'all'")
     p.add_argument("--seed", type=int, default=4_000_000)
     p.add_argument("--fps", type=int, default=30)
+    p.add_argument("--crf", type=int, default=18,
+                   help="x264 quality, lower is sharper. The viewport is flat colour and "
+                        "thin text, which the encoder default smears into mush")
     args = p.parse_args(argv)
 
     names = list(ARENAS) if args.arena == "all" else [args.arena]
@@ -62,7 +65,12 @@ def main(argv: list[str] | None = None) -> None:
 
     import imageio.v2 as imageio
 
-    writer = imageio.get_writer(args.out, fps=args.fps, macro_block_size=1)
+    # ffmpeg_params lands after the quality-derived flags, so this -crf is the one that
+    # takes effect. The HUD is 11 px text; at the imageio default it is unreadable.
+    writer = imageio.get_writer(
+        args.out, fps=args.fps, macro_block_size=1,
+        ffmpeg_params=["-crf", str(args.crf), "-preset", "slow"],
+    )
     sink = StreamSink(writer)
     try:
         for i, name in enumerate(names):
