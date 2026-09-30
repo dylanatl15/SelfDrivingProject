@@ -125,8 +125,15 @@ def test_build_writes_a_self_contained_directory(tmp_path):
     counts = build(DATA, out)
     assert (out / "index.html").read_text().startswith("<!DOCTYPE html>")
     assert counts.needed > 0
-    # One page and one image; no stylesheet or script to go missing behind the tunnel.
-    assert {p.name for p in out.iterdir()} <= {"index.html", "demo.gif"}
+    # One page and its clips; no stylesheet or script to go missing behind the tunnel.
+    assert {p.name for p in out.iterdir()} <= {
+        "index.html",
+        "demo-loop.mp4",
+        "demo-poster.jpg",
+        "demo.mp4",
+    }
+    for name in ("demo-loop.mp4", "demo-poster.jpg"):
+        assert f'"{name}"' in (out / "index.html").read_text(), f"{name} copied but unreferenced"
 
 
 def test_covered_lines_are_never_asks():
@@ -141,3 +148,27 @@ def test_covered_lines_are_never_asks():
         for i in g["items"]
         if public_state(i.get("state", "needed")) == "needed"
     )
+
+
+def test_every_contact_address_is_a_recipient_of_every_button():
+    """Both addresses go in To:, on every button.
+
+    One address is where outreach is sent from and the other is where replies are read. A
+    button that drops either one either loses the reply or makes a vendor wonder why a
+    stranger is answering the email they got - so this is pinned, not reviewed.
+    """
+    page, _ = render(REAL)
+    addresses = REAL["meta"]["contact"]
+    assert len(addresses) >= 2
+    links = re.findall(r'href="mailto:([^"?]+)', page)
+    assert links, "the page has no mail button at all"
+    for link in links:
+        assert sorted(link.split(",")) == sorted(addresses)
+
+
+def test_the_subject_survives_a_space_intolerant_mail_client():
+    page, _ = render(REAL)
+    subjects = re.findall(r"\?subject=([^\"]+)", page)
+    assert subjects
+    for subject in subjects:
+        assert " " not in subject

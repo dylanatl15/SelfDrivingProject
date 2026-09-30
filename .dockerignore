@@ -5,7 +5,9 @@
 .worktrees
 runs
 media/*
-!media/demo.gif
+!media/demo-loop.mp4
+!media/demo-poster.jpg
+!media/demo.mp4
 **/__pycache__
 **/*.pyc
 .pytest_cache

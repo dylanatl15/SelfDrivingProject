@@ -10,29 +10,50 @@ computer in place of the phone. What that swap costs the software is in
 
 > **The 2026 memory shortage dominates this BOM.** LPDDR4/5 is being bid away by AI
 > datacentre demand, so single-board computers have roughly doubled or tripled in a year:
-> the Raspberry Pi 5 16 GB went from $120 at launch to **$305**, and the Jetson Orin Nano
-> Super from $249 to **$399**. Compute is now more expensive than the depth camera. That
-> flips the recommendation — see the fork below — and it is a legitimate thing to say in a
+> the Raspberry Pi 5 16 GB went from $120 at launch to **$305**. Compute is now within
+> striking distance of the depth camera, which is a legitimate thing to say in a
 > sponsorship email, because it is why the team cannot simply buy these parts.
 
-## The architecture fork — pick by what a sponsor actually says yes to
+## The architecture fork — two options, and both are fine
 
 | | Camera does | Host does | Sensor + compute |
 |---|---|---|---|
 | **A — recommended** | depth **and runs the policy on-device** | bridge to the ESP32, logging, GPS | **~$454** |
-| **B** | depth only, with a built-in IMU | depth → policy on an AI accelerator | ~$619–749 |
-| **C — budget** | depth only, cheap | everything | ~$295 |
-| **D** | depth only, widest FOV | replaced by a Jetson (ZED needs CUDA, not a Pi) | ~$898 |
-| **E — wildcard** | **360° planar scan**, not a camera | modest | **~$195** |
+| **B** | depth in its own silicon, over USB | bucket the depth frame, run the policy | **~$499–519** |
 
-**A wins on price now**, which was not true a year ago. A camera that runs the network
-on-device needs only a small host, while a passive camera forces a Pi 5 16 GB *and* an AI
-accelerator — together more than the camera. **E is the cheapest of all and arguably the
-best sensor**: a 360° scan is strictly more information than a 69° forward arc, the
-simulator already ray-casts, and it removes the rear blind spot that forces the back-out
-reflex to drive blind. Worth one email regardless of which option lands.
+The two are close enough on price that whichever vendor answers first wins. A wins slightly
+because the host never has to see a depth frame at all.
 
-All four run the same reward, the same exams and the same shield. Email all of them.
+**Neither option needs an AI accelerator, and we should stop asking for one.** That line was
+sized for a host doing monocular depth *estimation*. It is not: every camera below produces
+depth in hardware, so the Pi's entire job is to reduce a depth frame to eight column minima
+and evaluate a 120 → 256 → 256 → 2 MLP at 30 Hz. That is microseconds of CPU. An AI HAT+
+would sit idle, and asking a sponsor for one we do not need is exactly the thing this
+document is supposed to prevent.
+
+Both options run the same reward, the same exams and the same shield. Email both.
+
+### Ruled out, with the reason — do not re-add these
+
+Recorded here so that nobody, us included, puts them back on the sponsor page in six months.
+
+- **360° planar laser scanners (Slamtec RPLIDAR and anything like them).** It reads as the
+  best sensor on paper — 360°, 12 m, $72 — and it is wrong for *this* car. A scanner has to
+  be mounted above the chassis so the body does not sit in its own beam, and from up there
+  it sees a single horizontal plane above the car. Most of what a 1/10-scale car has to
+  avoid is *shorter* than the car: cones, kerbs, chair feet, the lip of a doorway. A sensor
+  that cannot see a cone is not an upgrade over a camera that can, whatever its spec sheet
+  says. This is not a randomization range we can widen; it is geometry.
+- **Small CSI time-of-flight modules (Arducam ToF and similar), ~$50.** 240×180 at 4 m, and
+  narrower than the phone. We already own a phone whose ARCore depth is better in daylight
+  and at range. Its one genuine advantage over the phone — depth while stationary — is an
+  advantage every camera in the table below also has, at real resolution. Taking one would
+  mean a sponsor paid for a downgrade.
+- **Stereolabs ZED 2i, $499, and the NVIDIA Jetson Orin Nano Super, $399, that it needs.**
+  The ZED does its depth on the *host* GPU, so it drags a Jetson in behind it and nearly
+  triples the compute budget. It buys 110° of field of view, which is inside our randomized
+  55–125° band and therefore worth roughly nothing that the $264 Orbbec does not already
+  give us. The Jetson had no other reason to be on this list and goes with it.
 
 ---
 
@@ -51,26 +72,22 @@ All four run the same reward, the same exams and the same shield. Email all of t
 | [Intel RealSense D435](https://store.intelrealsense.com/buy-intel-realsense-depth-camera-d435.html) | $314 | 87° | same without the IMU |
 | [Orbbec Gemini 335](https://store.orbbec.com/products/gemini-335) | $264 | ~90° | cheapest name-brand active stereo |
 | [Orbbec Gemini 335L](https://store.orbbec.com/products/gemini-335l) | $359 | ~90° | longer range |
-| [Arducam ToF for Raspberry Pi](https://docs.arducam.com/Raspberry-Pi-Camera/Tof-camera/TOF-Camera/) | ~$50 | ~70° | CSI-native, 240×180, 4 m. Cheapest path (Option C) |
-| [Stereolabs ZED 2i](https://www.stereolabs.com/store/products/zed-2i) | $499 | 110° | **requires an NVIDIA GPU** — Jetson, not a Pi (Option D) |
-| [**Slamtec RPLIDAR C1**](https://www.robotshop.com/products/slamtec-rplidar-c1-360-dtof-laser-scanner) | **$72** | **360°** | not a depth camera. DTOF, 12 m. Cheapest and most informative option on this page (Option E) |
 
-Contacts: Luxonis, RealSense Inc., Orbbec, Arducam, Stereolabs, Slamtec, RobotShop, DFRobot,
-Seeed, Waveshare.
+Every row above does its depth work in its own silicon, which is why the host stays small.
+See *Ruled out* for the three that used to be in this table.
+
+Contacts: Luxonis, RealSense Inc., Orbbec, RobotShop, DFRobot, Seeed, Waveshare.
 
 ### 2. Host computer
 
 | Option | Price | Note |
 |---|---|---|
-| [Raspberry Pi 5 4 GB](https://www.pishop.us/product/raspberry-pi-5-4gb/) | **$110** | enough for Option A or E, where the camera or the lidar does the heavy lifting |
-| [Raspberry Pi 5 8 GB](https://www.pishop.us/product/raspberry-pi-5-8gb/) | **$175** | ask for this one; comfortable for Option B/C |
+| [Raspberry Pi 5 4 GB](https://www.pishop.us/product/raspberry-pi-5-4gb/) | **$110** | genuinely enough: the camera does the depth and the policy is a two-layer MLP |
+| [**Raspberry Pi 5 8 GB**](https://www.pishop.us/product/raspberry-pi-5-8gb/) | **$175** | **ask for this one.** The headroom is for the logging, not the network |
 | [Raspberry Pi 5 16 GB](https://www.raspberrypi.com/products/raspberry-pi-5/) | **$305** | only if a sponsor offers it outright |
-| [Raspberry Pi AI HAT+, 13 TOPS (Hailo-8L)](https://www.raspberrypi.com/products/ai-hat/) | from **$70** | required for Option B/C |
-| [Raspberry Pi AI HAT+, 26 TOPS (Hailo-8)](https://www.pishop.us/product/raspberry-pi-ai-hat-26-tops/) | **$110–120** | headroom for depth *and* policy |
-| [NVIDIA Jetson Orin Nano Super](https://marketplace.nvidia.com/en-us/enterprise/robotics-edge/jetson-orin-nano-super-developer-kit/) | **$399** | mandatory for the ZED (Option D) |
 | Active cooler + 27 W USB-C PSU + NVMe HAT + SSD | ~$75 total, not individually verified | the Pi 5 throttles without cooling, and an SD card will not survive the logging |
 
-Contacts: Raspberry Pi, PiShop, SparkFun, Hailo, NVIDIA, Seeed, Waveshare, CanaKit.
+Contacts: Raspberry Pi, PiShop, SparkFun, Seeed, Waveshare, CanaKit.
 
 ### 3. Microcontroller — 2 units, one spare
 
@@ -201,16 +218,16 @@ Contacts: ROBOTIS, Feetech, Waveshare, ServoCity, Pololu, Adafruit.
 
 | Build | Camera | Host | Chassis path | Total |
 |---|---|---|---|---|
-| **E — lidar** | RPLIDAR C1 $72 | Pi 5 4 GB $110 + ESP32 $15 | Hiwonder $50 | **~$430** |
-| **C — budget ToF** | Arducam ~$50 | Pi 5 8 GB $175 + AI HAT+ $70 + ESP32 $15 | Hiwonder $50 | **~$520** |
-| **A — on-device AI** | OAK-D S2 $329 | Pi 5 4 GB $110 + ESP32 $15 | TT-02R $158 | **~$790** |
-| **B — RealSense** | D435i $334 | Pi 5 8 GB $175 + AI HAT+ $110 + ESP32 $15 | TT-02R $158 | **~$960** |
-| **D — ZED** | ZED 2i $499 | Jetson Orin Nano $399 + ESP32 $15 | Slash 4X4 $430 | **~$1,460** |
+| **A — cheapest** | OAK-D S2 $329 | Pi 5 4 GB $110 + ESP32 $15 | Hiwonder $50 | **~$504** |
+| **B — Orbbec** | Gemini 335 $264 | Pi 5 8 GB $175 + ESP32 $15 | Hiwonder $50 | **~$504** |
+| **B — RealSense** | D435i $334 | Pi 5 8 GB $175 + ESP32 $15 | Hiwonder $50 | **~$574** |
+| **A — kit chassis** | OAK-D S2 $329 | Pi 5 8 GB $175 + ESP32 $15 | TT-02R $158 | **~$677** |
 
 Add roughly **$300** to any row for the common lines: rangefinders $60, IMU $30, GPS $71,
 batteries and charger $155, buck $33, radio kill switch $60, cooling and storage $75,
-wiring $50. A fully sponsored build lands between **$730 and $1,760** depending on which
-camera says yes first.
+wiring $50. A fully sponsored build lands between **$800 and $980** depending on which
+camera and which chassis say yes first. The IMU line disappears if the camera that
+arrives is the RealSense, which has one built in.
 
 ---
 
@@ -219,11 +236,13 @@ camera says yes first.
 - **3D printing or filament.** A team member has a printer; this is covered in-house.
 - **A phone.** Either the current S21 FE stays as the pose and GPS source, or items 8 and 1
   replace it. Neither case needs a donated phone.
+- **A 360° laser scanner, a small CSI ToF module, or a ZED.** See *Ruled out* above for the
+  reason in each case. Turning down a donated part is worse for everyone than never asking.
 
 ## Notes for whoever writes the emails
 
 - **Lead with the repository and the video.** `github.com/dylanatl15/SelfDrivingProject` is
-  public, has 412 tests and a demo reel at `media/demo.mp4`. A working artifact opens doors
+  public, has 414 tests and a demo reel at `media/demo.mp4`. A working artifact opens doors
   that a description of intent does not.
 - **One item per email**, with the option list attached as "any of these would work." It
   costs the vendor nothing to pick the cheapest thing on their shelf, and it raises the

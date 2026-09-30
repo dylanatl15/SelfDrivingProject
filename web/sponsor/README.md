@@ -18,8 +18,11 @@ web/sponsor/Dockerfile        multi-stage: generates the page, then serves it
 tests/test_sponsor_page.py    pins the publishing rules
 ```
 
-The page is generated at **image build time** from `parts.yaml` and `media/demo.gif`, so it
-cannot be stale relative to its data. `web/sponsor/dist/` is generated output and is
+The page is generated at **image build time** from `parts.yaml` and the clips in `media/`,
+so it cannot be stale relative to its data. The hero is `media/demo-loop.mp4` played inline;
+`media/demo.mp4` is linked from the caption as the full reel. Both are copied into `dist/`
+by `build()`, and `.dockerignore` has to allow each one through or the page ships a broken
+player. `web/sponsor/dist/` is generated output and is
 gitignored.
 
 Preview locally without Docker:
@@ -45,13 +48,18 @@ These are enforced in the generator and pinned by tests, not left to whoever edi
 ## Updating it when a sponsor answers
 
 ```yaml
-- part: Depth camera or 360 laser scanner
+- part: Depth camera
   state: received          # was: needed
   by: Luxonis              # shown publicly, with thanks
 ```
 
 Then rebuild the container. The git history of `parts.yaml` is the audit trail of who
 offered what and when, which is the reason this is one file and not a page of HTML.
+
+**Then add them to the repository README as well.** What the page promises a sponsor is
+deliberately split: this page carries their name only while the ask is open and comes down
+when the car is built, so the durable half of the promise is the project's own README. A
+sponsor recorded only here would lose their credit the day this container is stopped.
 
 ## Adding it to the portfolio stack
 

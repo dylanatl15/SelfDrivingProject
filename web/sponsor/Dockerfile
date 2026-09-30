@@ -1,7 +1,8 @@
 # Public sponsor page: sponsor.dylantamayo.dev
 #
 # Build context is the REPOSITORY ROOT, not this directory, because the page is generated
-# from `web/sponsor/parts.yaml` and `media/demo.gif` at image build time. That is on purpose:
+# from `web/sponsor/parts.yaml` and the clips in `media/` at image build time. That is on
+# purpose:
 # it makes "did you remember to re-run the generator?" impossible to get wrong.
 #
 #   docker build -f web/sponsor/Dockerfile -t sponsor-page .
@@ -14,7 +15,9 @@ RUN pip install --no-cache-dir "pyyaml>=6"
 COPY src/selfdrive/__init__.py src/selfdrive/__init__.py
 COPY src/selfdrive/web src/selfdrive/web
 COPY web/sponsor/parts.yaml web/sponsor/parts.yaml
-COPY media/demo.gif media/demo.gif
+COPY media/demo-loop.mp4 media/demo-loop.mp4
+COPY media/demo-poster.jpg media/demo-poster.jpg
+COPY media/demo.mp4 media/demo.mp4
 ENV PYTHONPATH=/src/src
 RUN python -m selfdrive.web.sponsor && test -s web/sponsor/dist/index.html
 

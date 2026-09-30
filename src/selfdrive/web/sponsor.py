@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import html
 import shutil
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -37,7 +38,10 @@ KNOWN_STATES = STILL_NEEDED | PUBLIC_NAMED | {"covered"}
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DATA = REPO_ROOT / "web" / "sponsor" / "parts.yaml"
 DIST = REPO_ROOT / "web" / "sponsor" / "dist"
-DEMO_GIF = REPO_ROOT / "media" / "demo.gif"
+DEMO_VIDEO = REPO_ROOT / "media" / "demo-loop.mp4"
+DEMO_POSTER = REPO_ROOT / "media" / "demo-poster.jpg"
+DEMO_REEL = REPO_ROOT / "media" / "demo.mp4"
+MEDIA = (DEMO_VIDEO, DEMO_POSTER, DEMO_REEL)
 
 
 def esc(value: Any) -> str:
@@ -132,8 +136,24 @@ def render(data: dict) -> tuple[str, Counts]:
         + (f' &middot; <strong>{counts.received}</strong> received' if counts.received else "")
     )
 
-    mailto = esc(meta["contact"])
-    subject = "Sponsoring the self-driving scale car"
+    # Both addresses go in the To: field, not one in To and one in Cc. A vendor replying
+    # from their phone hits "reply all" or they do not, and either way the reply has to land
+    # somewhere that is read - and it has to show the address they were written from, so the
+    # exchange does not look like two different people.
+    # Two addresses, both the same person: one university, one professional. A vendor is
+    # written to from the first and may reply to either, so both go in To:.
+    #
+    # Cloudflare's Email Obfuscation is on for this zone and rewrites these hrefs into
+    # /cdn-cgi/l/email-protection. That is free anti-scraping and the decoded mailto is
+    # byte-identical, so the buttons still open the same draft. Nothing here is meant to be
+    # read as text, so no `email_off` directive is needed.
+    addresses = meta["contact"]
+    if isinstance(addresses, str):
+        addresses = [addresses]
+    mailto = esc(",".join(addresses))
+    # Percent-encoded: a raw space in a mailto query is tolerated by most clients and
+    # silently truncates the subject in a few.
+    subject = urllib.parse.quote("Sponsoring the self-driving scale car")
     page = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -197,7 +217,7 @@ def render(data: dict) -> tuple[str, Counts]:
   .tally {{ margin: 22px 0 0; font-size: 15px; color: var(--dim); }}
   .tally strong {{ color: var(--ink); font-variant-numeric: tabular-nums; }}
   figure.demo {{ margin: 34px 0 0; }}
-  figure.demo img {{
+  figure.demo video {{
     width: 100%; height: auto; display: block; border-radius: 14px; border: 1px solid var(--line);
     background: #000;
   }}
@@ -276,17 +296,24 @@ def render(data: dict) -> tuple[str, Counts]:
   <h1>{esc(meta["title"])}<br><span class="grad">parts we still need</span></h1>
   <p class="lede">{esc(meta["tagline"])}</p>
   <div class="cta">
-    <a class="btn primary" href="mailto:{mailto}?subject={esc(subject)}">Offer a part</a>
+    <a class="btn primary" href="mailto:{mailto}?subject={subject}">Offer a part</a>
     <a class="btn" href="{esc(meta["repo"])}" rel="noopener">Read the code</a>
     <a class="btn" href="#parts">See the list</a>
   </div>
-  <p class="tally">{tally}. We are not collecting money - only parts, and only the ones listed.</p>
+  <p class="tally">{tally}. We are not collecting money - only parts, and only the ones we
+     have decided we would actually fit to the car.</p>
   <figure class="demo">
-    <img src="demo.gif" width="480" height="360"
-         alt="A trained policy driving a simulated car through a cluttered arena to a goal.">
+    <video src="demo-loop.mp4" poster="demo-poster.jpg" width="960" height="720"
+           autoplay muted loop playsinline preload="metadata"
+           aria-label="A trained policy driving a simulated car through a cluttered arena
+                       to the goal it was given.">
+    </video>
     <figcaption>
-      A trained policy driving in our simulator. Gold ring is the goal it is aiming for, the
-      trail is painted by speed. Real output from the code linked above, not an animation.
+      A trained policy driving in our simulator, recorded straight out of the evaluation loop -
+      the readout in the corner is live, not a caption. The gold ring is the goal it is aiming
+      for, and the trail behind it is painted by speed.
+      <a href="demo.mp4">The full two-minute reel</a> runs the same policy through all six of our
+      test arenas.
     </figcaption>
   </figure>
 </header>
@@ -299,19 +326,21 @@ def render(data: dict) -> tuple[str, Counts]:
 <section id="parts">
   <h2>What we still need</h2>
   <p class="gblurb">
-    Every part below lists more than one option because we would rather you send whatever is
-    already on your shelf than the exact thing we named. Prices are what the vendor's own store
-    said on {esc(meta["prices_checked"])}, and each one links to where we read it.
+    Most parts below list a few options, because we would much rather have whatever is already
+    on your shelf than the exact thing we named first. Every option is one we have checked and
+    would genuinely fit to the car - if something was a step backwards from what we already have,
+    we left it off rather than let anyone spend money on it. Prices are what the vendor's own
+    store said on {esc(meta["prices_checked"])}, and each links to where we read it.
   </p>
 </section>
 
 {"".join(groups)}
 
 <section id="covered">
-  <h2>Already covered - please do not send these</h2>
+  <h2>Already covered</h2>
   <p class="gblurb">
-    A list of everything a project could use is a wish list. This is not that. These lines are
-    handled, and a surplus of them would cost you money and help us nothing.
+    We are listing these so you do not spend anything on our behalf that we do not need. They are
+    genuinely handled, and we would rather tell you now than have you find out after posting.
   </p>
   <div class="panel"><ul class="plain">{covered}</ul></div>
 </section>
@@ -322,16 +351,21 @@ def render(data: dict) -> tuple[str, Counts]:
 </section>
 
 <section id="else">
-  <h2>Have something else?</h2>
+  <h2>Have something close, but not exactly this?</h2>
   <div class="panel">
     <p style="margin:0 0 12px">
-      Send it anyway. The list above is what our current design asks for, not the limit of what
-      we can use - a different sensor, a better motor, a spare battery or a part we did not think
-      to ask for are all worth an email. If it changes the design, we will tell you how, publicly,
-      in the repository.
+      We would still love to hear about it. The list above is what our current design asks for,
+      which is not the same as the limit of what we can use - a different sensor, another motor, a
+      spare battery, or something we simply did not think to ask for are all worth an email. We
+      will read it properly and tell you honestly whether it fits, and if it changes the design we
+      will write up how, publicly, in the repository.
+    </p>
+    <p style="margin:0 0 12px">
+      And if the answer is no, that is completely fine. We know parts cost money and shipping
+      costs time, and we are grateful for the look either way.
     </p>
     <p style="margin:0">
-      <a class="btn primary" href="mailto:{mailto}?subject={esc(subject)}">{mailto}</a>
+      <a class="btn primary" href="mailto:{mailto}?subject={subject}">Email us</a>
     </p>
   </div>
 </section>
@@ -343,8 +377,8 @@ def render(data: dict) -> tuple[str, Counts]:
   <p>The full engineering bill of materials, with the reasoning behind every choice, is
      <a href="{esc(meta["bom"])}" rel="noopener">in the repository</a>. So is the page you are
      reading - it is generated from one file, so it cannot drift from what we tell you by email.</p>
-  <p>This page is built and maintained by <a href="{esc(meta["portfolio"])}">Dylan Tamayo</a>,
-     who writes the simulator and the learning half of this project.</p>
+  <p>Contact buttons direct to <a href="{esc(meta["portfolio"])}">Dylan Tamayo</a>, Software
+     &amp; Autonomy Engineer for the project.</p>
 </footer>
 
 </div>
@@ -359,8 +393,9 @@ def build(data_path: Path = DATA, out_dir: Path = DIST) -> Counts:
     page, counts = render(data)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "index.html").write_text(page)
-    if DEMO_GIF.exists():
-        shutil.copy2(DEMO_GIF, out_dir / "demo.gif")
+    for src in MEDIA:
+        if src.exists():
+            shutil.copy2(src, out_dir / src.name)
     return counts
 
 
@@ -375,8 +410,9 @@ def main(argv=None) -> None:
     counts = build(args.data, args.out)
     page = args.out / "index.html"
     print(f"wrote {page} ({page.stat().st_size / 1024:.0f} kB) - {counts}")
-    if not DEMO_GIF.exists():
-        print(f"warning: {DEMO_GIF} missing, the page will show a broken image")
+    for src in MEDIA:
+        if not src.exists():
+            print(f"warning: {src} missing, the page will link to nothing")
 
 
 if __name__ == "__main__":
