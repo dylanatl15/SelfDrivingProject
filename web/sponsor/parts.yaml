@@ -29,7 +29,7 @@ meta:
   # is the one outreach email is sent from, so it is the one a vendor will recognise; the
   # personal one is the one that is read on a phone at 9pm.
   contact:
-    - dylantamayo01@utrgv.edu
+    - dylan.tamayo01@utrgv.edu
     - contact.dylantamayo@gmail.com
   repo: https://github.com/dylanatl15/SelfDrivingProject
   portfolio: https://dylantamayo.dev
