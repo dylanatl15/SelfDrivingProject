@@ -16,6 +16,19 @@
 # Prices are quoted from the vendor's own store on the date in `meta.prices_checked`.
 # `verified: false` marks a figure nobody has checked. Do not quote one in an email.
 #
+# `contribution` says how a named part came to us, and it decides recognition. It is
+# required once `state` is pledged or received, and must be absent before that:
+#
+#   donated     given to us, we keep it      -> logo tier
+#   loaned      lent, returned after the demo -> logo tier
+#   discounted  we paid, they cut the price   -> named thank-you, NO logo
+#   purchased   we paid the ordinary price    -> not sponsorship, names nobody
+#
+# A DISCOUNT DOES NOT BUY A LOGO. A donated part is a gift; a discount is a sale we got
+# cheaper. Recognising them identically is unfair to the donor in a way anyone can check,
+# and it makes the poster look bought. The tier belongs to the VENDOR, not the part, and
+# their best contribution wins: donate one part and discount another and you are a donor.
+#
 # EVERY OPTION MUST BE ONE WE WOULD ACTUALLY ACCEPT AND USE. An option we would turn down
 # is not generosity, it is a trap: a vendor ships it, we cannot use it, and we have wasted
 # their money and their goodwill. Parts ruled out during the design are recorded in
@@ -39,7 +52,7 @@ meta:
 
 # Short, checkable claims. Numbers only, no adjectives.
 status:
-  - Simulator and reinforcement-learning stack are built, tested and public - 414 unit tests.
+  - Simulator and reinforcement-learning stack are built, tested and public - 424 unit tests.
   - Policies train on 20 parallel workers and are scored on 100 held-out arenas they never saw.
   - Best policy reaches 2.3 waypoints per 50 s run on unseen arenas and covers 19.1 m² of new ground.
   - It still crashes on 17 % of those held-out runs. That number is going down and we publish it.
@@ -370,16 +383,36 @@ covered:
 
 # What we can actually offer. Promise nothing that is not in our control.
 sponsor_gets:
-  - >-
-    Your name and logo on this page, and on the finished project's GitHub repository once the car
-    is built - so your logo does not end its life on a page asking for parts. The repository is
-    the one that lasts; this page comes down when the build is done.
-  - Your name and logo on the project poster and in the final written report.
-  - A credit in the demo video itself, which is the first thing most people see of this project.
-  - Photographs of your part on the finished car, and the measured results it produced.
-  - >-
-    An honest public writeup either way. If a part turns out not to suit our design, we will say
-    why, and we will say it about the design rather than about you.
-  - >-
-    Everything lives in one open-source repository, so the work your part made possible stays
-    readable and citable there for as long as the repository is up.
+
+  # The logo tier. Earned by giving us a part or lending us one - nothing else.
+  donated:
+    - >-
+      Your name and logo on this page, and on the finished project's GitHub repository once the car
+      is built - so your logo does not end its life on a page asking for parts. The repository is
+      the one that lasts; this page comes down when the build is done.
+    - Your name and logo on the project poster and in the final written report.
+    - >-
+      A credit in the demo video itself, which is the first thing most people see of this project.
+      We keep that one for donated and loaned parts, because it is the slot we have least of.
+    - Photographs of your part on the finished car, and the measured results it produced.
+    - >-
+      If the part is a loan, all of the above still applies, and we say plainly that it was lent
+      rather than given. We give you credit for supporting our project even though the part will
+      be returned.
+    - >-
+      An honest public writeup either way. If a part turns out not to suit our design, we will say
+      why, and we will say it about the design rather than about you.
+    - >-
+      Everything lives in one open-source repository, so the work your part made possible stays
+      readable and citable there for as long as the repository is up.
+
+  # Real, and deliberately smaller. A discount is still generous; it is not a gift.
+  discounted:
+    - >-
+      Your name in the thank-you line on this page and on the project's GitHub repository, saying
+      you gave us a discount.
+    - A named thank-you in the final written report.
+    - The same honest writeup of how the part performed, under your name.
+    - >-
+      No logo on the poster or in the demo video. We would rather be straight with you about that
+      up front than have you find out when you see the poster.

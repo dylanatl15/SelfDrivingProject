@@ -4,6 +4,14 @@
 Prices move; recheck before quoting one in an email. Assume the team owns nothing, so that
 sponsors cover the build rather than the members.
 
+**What a vendor is offered depends on what they give.** A donated or lent part earns the
+logo tier: the sponsor page, this repository's README, the poster, the written report and a
+credit in the demo video. A discount earns a named thank-you in those places and no logo,
+because a discount is a sale we got cheaper rather than a gift, and recognising the two
+identically is unfair to the donor in a way anyone can check. The tier belongs to the vendor
+and their best contribution wins. Do not offer more than this in an email -
+[`web/sponsor/README.md`](../web/sponsor/README.md) is the rule, and the page publishes it.
+
 This list is for the **next** hardware generation: a depth camera and a single-board
 computer in place of the phone. What that swap costs the software is in
 [`architecture.md`](architecture.md#what-the-move-costs). Nothing here is built yet.
@@ -242,7 +250,7 @@ arrives is the RealSense, which has one built in.
 ## Notes for whoever writes the emails
 
 - **Lead with the repository and the video.** `github.com/dylanatl15/SelfDrivingProject` is
-  public, has 414 tests and a demo reel at `media/demo.mp4`. A working artifact opens doors
+  public, has 424 tests and a demo reel at `media/demo.mp4`. A working artifact opens doors
   that a description of intent does not.
 - **One item per email**, with the option list attached as "any of these would work." It
   costs the vendor nothing to pick the cheapest thing on their shelf, and it raises the

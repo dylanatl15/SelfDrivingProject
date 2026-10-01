@@ -51,15 +51,30 @@ These are enforced in the generator and pinned by tests, not left to whoever edi
 - part: Depth camera
   state: received          # was: needed
   by: Luxonis              # shown publicly, with thanks
+  contribution: donated    # donated | loaned | discounted | purchased
 ```
+
+`contribution` is required the moment `state` becomes `pledged` or `received`, and the
+generator raises if it is missing. That is deliberate: without it a forgotten field would
+fall back to the most generous reading and credit a discount as a donation.
+
+**A discount does not buy a logo.** `donated` and `loaned` earn the logo tier - page, repo
+README, poster, report, demo video. `discounted` earns a named thank-you and nothing else.
+`purchased` means we paid the ordinary price, which is not sponsorship, so it names nobody.
+The page publishes both tiers, so no vendor can be surprised by which one they are in.
+
+The tier belongs to the **vendor**, not the part, and their best contribution wins. A
+company that donates one part and discounts another is a donor outright - the page will
+not split them across both lists, and `tests/test_sponsor_page.py` pins that.
 
 Then rebuild the container. The git history of `parts.yaml` is the audit trail of who
 offered what and when, which is the reason this is one file and not a page of HTML.
 
-**Then add them to the repository README as well.** What the page promises a sponsor is
-deliberately split: this page carries their name only while the ask is open and comes down
-when the car is built, so the durable half of the promise is the project's own README. A
-sponsor recorded only here would lose their credit the day this container is stopped.
+**Then add them to the repository README as well**, in the tier they earned. What the page
+promises a sponsor is deliberately split: this page carries their name only while the ask is
+open and comes down when the car is built, so the durable half of the promise is the
+project's own README. A sponsor recorded only here would lose their credit the day this
+container is stopped.
 
 ## Adding it to the portfolio stack
 

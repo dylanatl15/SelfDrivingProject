@@ -8,6 +8,9 @@ them are not style questions:
 - A vendor who declined or never answered must be indistinguishable from one nobody has
   emailed yet. Publishing "declined" is both rude and a bad negotiating position.
 - Notes the team writes for itself must not render, even though the repository is public.
+- A discount must not buy what a donation buys. The logo tier is for a part given or lent;
+  a discount earns a named thank-you and nothing more. Tier belongs to the vendor, best
+  contribution winning, so a donor who also discounts something stays a donor.
 """
 
 from __future__ import annotations
@@ -17,7 +20,15 @@ import re
 import pytest
 import yaml
 
-from selfdrive.web.sponsor import DATA, KNOWN_STATES, build, public_state, render
+from selfdrive.web.sponsor import (
+    DATA,
+    KNOWN_CONTRIBUTIONS,
+    KNOWN_STATES,
+    LOGO_TIER,
+    build,
+    public_state,
+    render,
+)
 
 REAL = yaml.safe_load(DATA.read_text())
 
@@ -36,7 +47,7 @@ def _minimal(state: str = "needed", **extra) -> dict:
         "status": ["fine"],
         "groups": [{"name": "Only", "items": [item]}],
         "covered": [],
-        "sponsor_gets": [],
+        "sponsor_gets": {"donated": [], "discounted": []},
     }
 
 
@@ -82,12 +93,16 @@ def test_cold_asks_are_indistinguishable_from_untouched_lines(hidden):
 
 
 def test_pledged_and_received_name_the_sponsor():
-    pledged, counts = render(_minimal("pledged", by="Acme Corporation"))
-    assert "Pledged by Acme Corporation" in pledged
+    pledged, counts = render(
+        _minimal("pledged", by="Acme Corporation", contribution="donated")
+    )
+    assert "Donation pledged by Acme Corporation" in pledged
     assert counts.pledged == 1 and counts.needed == 0
 
-    got, counts = render(_minimal("received", by="Acme Corporation"))
-    assert "thank you, Acme Corporation" in got
+    got, counts = render(
+        _minimal("received", by="Acme Corporation", contribution="donated")
+    )
+    assert "Donated by Acme Corporation - thank you" in got
     assert counts.received == 1 and counts.needed == 0
 
 
@@ -172,3 +187,90 @@ def test_the_subject_survives_a_space_intolerant_mail_client():
     assert subjects
     for subject in subjects:
         assert " " not in subject
+
+
+def _two_vendors(*items: dict) -> dict:
+    base = _minimal()
+    base["groups"] = [{"name": "Only", "items": list(items)}]
+    return base
+
+
+def _part(name: str, **extra) -> dict:
+    item = {
+        "part": name,
+        "why": "Because.",
+        "options": [{"name": "Acme Widget", "price": "$10"}],
+    }
+    item.update(extra)
+    return item
+
+
+@pytest.mark.parametrize("contribution", sorted(KNOWN_CONTRIBUTIONS))
+def test_every_contribution_renders_a_badge_that_says_what_happened(contribution):
+    for state in ("pledged", "received"):
+        page, _ = render(_minimal(state, by="Acme Corporation", contribution=contribution))
+        assert '<span class="badge' in page
+        if contribution == "purchased":
+            assert "Acme Corporation" not in page, "a part we paid full price for names nobody"
+        else:
+            assert "Acme Corporation" in page
+
+
+def test_a_discount_never_earns_what_a_donation_earns():
+    """The whole point of the tier split: a discounted part must not put the vendor in the
+    donated-or-loaned line, which is the line that carries the logo."""
+    page, counts = render(
+        _two_vendors(
+            _part("Camera", state="received", by="Generous Co", contribution="donated"),
+            _part("Motor", state="received", by="Cheaper Co", contribution="discounted"),
+        )
+    )
+    assert counts.tier(LOGO_TIER) == ["Generous Co"]
+    assert counts.tier(("discounted",)) == ["Cheaper Co"]
+    donated_line = page.split("Parts donated or loaned by")[1].split("</p>")[0]
+    assert "Generous Co" in donated_line
+    assert "Cheaper Co" not in donated_line
+    assert "Cheaper Co" in page.split("With thanks also to")[1].split("</p>")[0]
+
+
+def test_a_loan_sits_in_the_logo_tier_but_is_described_as_a_loan():
+    page, counts = render(_minimal("received", by="Lender Co", contribution="loaned"))
+    assert counts.tier(LOGO_TIER) == ["Lender Co"]
+    assert "On loan from Lender Co" in page
+    assert "Donated by Lender Co" not in page, "a loan must not read as a gift"
+
+
+def test_a_vendor_who_donates_and_discounts_is_a_donor_outright():
+    _, counts = render(
+        _two_vendors(
+            _part("Camera", state="received", by="Mixed Co", contribution="discounted"),
+            _part("Motor", state="pledged", by="Mixed Co", contribution="donated"),
+        )
+    )
+    assert counts.tier(LOGO_TIER) == ["Mixed Co"]
+    assert counts.tier(("discounted",)) == []
+
+
+def test_the_credits_block_is_absent_while_nothing_has_been_given():
+    page, counts = render(REAL)
+    assert counts.vendors == {}
+    assert "Who has helped so far" not in page, "no empty trophy cabinet"
+
+
+def test_a_named_part_must_say_how_it_came_to_us():
+    """Without this, a forgotten field defaults to the most generous reading and credits a
+    discount as a donation."""
+    with pytest.raises(ValueError, match="no contribution"):
+        render(_minimal("pledged", by="Acme Corporation"))
+    with pytest.raises(ValueError, match="unknown contribution"):
+        render(_minimal("pledged", by="Acme Corporation", contribution="sponsored"))
+    with pytest.raises(ValueError, match="still needed but has contribution"):
+        render(_minimal("needed", contribution="donated"))
+
+
+def test_both_tiers_are_published_on_the_page():
+    page, _ = render(REAL)
+    assert "If you donate or lend a part" in page
+    assert "If you offer a discount" in page
+    for line in REAL["sponsor_gets"]["discounted"]:
+        assert line.split(".")[0][:40] in page.replace("&#x27;", "'")

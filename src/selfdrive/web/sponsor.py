@@ -2,7 +2,7 @@
 
     python -m selfdrive.web.sponsor            # -> web/sponsor/dist/
 
-Four rules are enforced here rather than left to whoever edits the page next, because
+Five rules are enforced here rather than left to whoever edits the page next, because
 each one is a way this kind of page does damage:
 
 1. **No money total.** Counting dollars turns a parts list into a fundraiser, and a
@@ -14,8 +14,14 @@ each one is a way this kind of page does damage:
    secret - it is a place for per-vendor status that does not belong in front of sponsors.
 4. **Every price carries the date it was checked**, and an unverified figure says so. A
    stale price in front of a sponsor is worse than no price.
+5. **A discount does not buy a logo.** A donated or loaned part is a gift; a discount is a
+   sale we got cheaper. Recognising them identically is unfair to the donor in a way anyone
+   can check, and it makes the poster look bought. `donated` and `loaned` earn the logo
+   tier, `discounted` earns a named thank-you and nothing else, and `purchased` is not
+   sponsorship at all. Tier is per *vendor*, not per part, and the best one wins: a vendor
+   who donates one part and discounts another is a donor outright.
 
-`tests/test_sponsor_page.py` pins all four.
+`tests/test_sponsor_page.py` pins all five.
 """
 
 from __future__ import annotations
@@ -23,7 +29,7 @@ from __future__ import annotations
 import html
 import shutil
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +40,31 @@ import yaml
 STILL_NEEDED = frozenset({"needed", "asked", "declined", "no_reply"})
 PUBLIC_NAMED = frozenset({"pledged", "received"})
 KNOWN_STATES = STILL_NEEDED | PUBLIC_NAMED | {"covered"}
+
+# How the part came to us, which is a different question from whether it has arrived.
+# See rule 5. LOGO_TIER is the only tier that earns a logo on the poster, in the report,
+# in the demo video and on the repository README.
+LOGO_TIER = ("donated", "loaned")
+THANKS_TIER = ("discounted",)
+NO_TIER = ("purchased",)
+KNOWN_CONTRIBUTIONS = frozenset(LOGO_TIER + THANKS_TIER + NO_TIER)
+
+# Ranked best first, so a vendor's best contribution decides their tier.
+TIER_RANK = {c: i for i, c in enumerate(LOGO_TIER + THANKS_TIER + NO_TIER)}
+
+# (state, contribution) -> badge class and wording. Written out rather than assembled from
+# fragments because every one of these lines is read by the vendor it names, and "Received"
+# on a part we paid full price for would be a quiet lie.
+BADGES: dict[tuple[str, str], tuple[str, str]] = {
+    ("pledged", "donated"): ("pledge", "Donation pledged by {by}"),
+    ("received", "donated"): ("got", "Donated by {by} - thank you"),
+    ("pledged", "loaned"): ("pledge", "Loan pledged by {by}"),
+    ("received", "loaned"): ("got", "On loan from {by} - thank you"),
+    ("pledged", "discounted"): ("pledge", "Discount offered by {by}"),
+    ("received", "discounted"): ("got", "Bought with a discount from {by}"),
+    ("pledged", "purchased"): ("own", "Buying it ourselves"),
+    ("received", "purchased"): ("own", "Bought by the team"),
+}
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DATA = REPO_ROOT / "web" / "sponsor" / "parts.yaml"
@@ -53,6 +84,17 @@ class Counts:
     needed: int = 0
     pledged: int = 0
     received: int = 0
+    # vendor name -> their best contribution across every part they helped with.
+    vendors: dict[str, str] = field(default_factory=dict)
+
+    def credit(self, by: str, contribution: str) -> None:
+        """Record a vendor at their best tier. Donor outright, not donor-for-one-part."""
+        best = self.vendors.get(by)
+        if best is None or TIER_RANK[contribution] < TIER_RANK[best]:
+            self.vendors[by] = contribution
+
+    def tier(self, names: tuple[str, ...]) -> list[str]:
+        return sorted(v for v, c in self.vendors.items() if c in names)
 
     def __str__(self) -> str:
         return f"{self.needed} still needed, {self.pledged} pledged, {self.received} received"
@@ -63,6 +105,32 @@ def public_state(state: str) -> str:
     if state not in KNOWN_STATES:
         raise ValueError(f"unknown state {state!r}; expected one of {sorted(KNOWN_STATES)}")
     return "needed" if state in STILL_NEEDED else state
+
+
+def contribution_of(item: dict, state: str) -> str:
+    """How a named part came to us. Required once a part is named, absent before.
+
+    A pledged part with no `contribution` is the failure this guards: it would fall back to
+    the most generous reading and credit a discount as a donation.
+    """
+    value = item.get("contribution")
+    if state == "needed":
+        if value is not None:
+            raise ValueError(
+                f"{item.get('part')!r} is still needed but has contribution {value!r}; "
+                "a part nobody has promised has not been contributed in any way"
+            )
+        return ""
+    if value is None:
+        raise ValueError(
+            f"{item.get('part')!r} is {state} but has no contribution; set one of "
+            f"{sorted(KNOWN_CONTRIBUTIONS)} so a discount is not credited as a donation"
+        )
+    if value not in KNOWN_CONTRIBUTIONS:
+        raise ValueError(
+            f"unknown contribution {value!r}; expected one of {sorted(KNOWN_CONTRIBUTIONS)}"
+        )
+    return value
 
 
 def _option(opt: dict) -> str:
@@ -81,17 +149,19 @@ def _option(opt: dict) -> str:
 
 def _item(item: dict, counts: Counts) -> str:
     state = public_state(item.get("state", "needed"))
+    contribution = contribution_of(item, state)
     if state == "needed":
         counts.needed += 1
         badge = '<span class="badge need">Still needed</span>'
-    elif state == "pledged":
-        counts.pledged += 1
-        by = esc(item.get("by", "a sponsor"))
-        badge = f'<span class="badge pledge">Pledged by {by}</span>'
     else:
-        counts.received += 1
-        by = esc(item.get("by", "a sponsor"))
-        badge = f'<span class="badge got">Received - thank you, {by}</span>'
+        counts.pledged += 1 if state == "pledged" else 0
+        counts.received += 1 if state == "received" else 0
+        # A part we bought at the ordinary price is not sponsorship, so it names nobody.
+        by = item.get("by", "a sponsor")
+        if contribution not in NO_TIER:
+            counts.credit(by, contribution)
+        css, wording = BADGES[(state, contribution)]
+        badge = f'<span class="badge {css}">{esc(wording.format(by=by))}</span>'
 
     qty = esc(item.get("qty", 1))
     qty_html = f'<span class="qty">{qty}</span>' if str(qty) not in ("1", "") else ""
@@ -127,7 +197,33 @@ def render(data: dict) -> tuple[str, Counts]:
         f'<li><strong>{esc(c["part"])}</strong> - {esc(c["note"])}</li>'
         for c in data.get("covered", [])
     )
-    gets = "".join(f"<li>{esc(g)}</li>" for g in data.get("sponsor_gets", []))
+    # Two tiers, stated on the page rather than decided quietly later. Publishing "a
+    # discount gets a thank-you, not a logo" is more convincing than any paragraph of copy,
+    # and it prevents the awkward conversation with a vendor who assumed otherwise.
+    tiers = data.get("sponsor_gets", {})
+    gets = "".join(f"<li>{esc(g)}</li>" for g in tiers.get("donated", []))
+    gets_discount = "".join(f"<li>{esc(g)}</li>" for g in tiers.get("discounted", []))
+
+    # Renders only once somebody is actually in it, so the page never shows an empty
+    # trophy cabinet while every part is still needed.
+    credits_html = ""
+    partners, thanks = counts.tier(LOGO_TIER), counts.tier(THANKS_TIER)
+    if partners or thanks:
+        blocks = ""
+        if partners:
+            blocks += (
+                "<p><strong>Parts donated or loaned by</strong><br>"
+                f'{esc(", ".join(partners))}</p>'
+            )
+        if thanks:
+            blocks += (
+                "<p><strong>With thanks also to</strong><br>"
+                f'{esc(", ".join(thanks))}, who gave us a discount.</p>'
+            )
+        credits_html = (
+            '<section id="credits"><h2>Who has helped so far</h2>'
+            f'<div class="panel">{blocks}</div></section>'
+        )
 
     # Parts, never dollars. See rule 1 in the module docstring.
     tally = (
@@ -263,6 +359,17 @@ def render(data: dict) -> tuple[str, Counts]:
   .badge.got {{
     color: #34d399; background: rgba(52,211,153,.10); border: 1px solid rgba(52,211,153,.34);
   }}
+  /* Bought at the ordinary price: no vendor named, so it is deliberately the quiet one. */
+  .badge.own {{
+    color: var(--dimmer); background: rgba(255,255,255,.04); border: 1px solid var(--line);
+  }}
+  h3.tierh {{
+    font-size: 15px; letter-spacing: .04em; text-transform: uppercase; color: var(--dim);
+    font-weight: 600; margin: 22px 0 10px;
+  }}
+  #credits .panel p {{ margin: 0 0 12px; color: var(--dim); }}
+  #credits .panel p:last-child {{ margin-bottom: 0; }}
+  #credits .panel strong {{ color: var(--ink); font-weight: 600; }}
   .why {{ margin: 0 0 10px; color: var(--dim); }}
   .spec, .inote {{ font-size: 14.5px; color: var(--dimmer); margin: 0 0 10px; }}
   .spec strong {{ color: var(--dim); font-weight: 600; }}
@@ -347,8 +454,22 @@ def render(data: dict) -> tuple[str, Counts]:
 
 <section id="gets">
   <h2>What a sponsor gets</h2>
+  <p class="gblurb">
+    We split this two ways on purpose. Sending us a part, or lending us one, is a gift, and it
+    is recognised as one. A discount is generous too, and we are glad of it, but we think it
+    is more fair to give a bigger spotlight to sponsors who gifted parts.
+  </p>
+  <h3 class="tierh">If you donate or lend a part</h3>
   <div class="panel"><ul class="plain">{gets}</ul></div>
+  <h3 class="tierh">If you offer a discount</h3>
+  <div class="panel"><ul class="plain">{gets_discount}</ul></div>
+  <p class="gblurb" style="margin-top:14px">
+    If you do both, you are in the first list - we are not going to split a company in half over
+    one invoice.
+  </p>
 </section>
+
+{credits_html}
 
 <section id="else">
   <h2>Have something close, but not exactly this?</h2>
