@@ -12,6 +12,21 @@ identically is unfair to the donor in a way anyone can check. The tier belongs t
 and their best contribution wins. Do not offer more than this in an email -
 [`web/sponsor/README.md`](../web/sponsor/README.md) is the rule, and the page publishes it.
 
+**Record what a vendor offers, and never publish the figure.** Offers go in
+`web/sponsor/offers.local.yaml`, which is **gitignored** - `parts.yaml` is committed to a
+public repository, so a quote written there is published. An entry names the option it is
+on and carries who, what kind, the per-unit price, shipping and an expiry date. The page
+badges that one option "Offer received - still open" - no name, no amount, no kind, and
+the part above it still reads "Still needed". What a company offered us is theirs to
+share rather than ours, and some of it comes under terms that forbid passing it on.
+A standing public code - a student discount, an education price, a sale anyone can use -
+is recorded as `kind: public_discount`. It ranks like any other price and badges nothing,
+because a price anyone can get is not sponsorship.
+`python -m selfdrive.web.sponsor --plan` prints the ranking for the team: cheapest path to
+each part, the whole build on those paths, every live price below list by expiry, and any
+lead that has not been pinned to a product yet. Rank by landed price, never by percent off - 20 %
+off a $334 camera is worse than 10 % off a $264 one.
+
 This list is for the **next** hardware generation: a depth camera and a single-board
 computer in place of the phone. What that swap costs the software is in
 [`architecture.md`](architecture.md#what-the-move-costs). Nothing here is built yet.

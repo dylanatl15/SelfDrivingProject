@@ -8,6 +8,8 @@ them are not style questions:
 - A vendor who declined or never answered must be indistinguishable from one nobody has
   emailed yet. Publishing "declined" is both rude and a bad negotiating position.
 - Notes the team writes for itself must not render, even though the repository is public.
+- An offer is published as a fact, never as a figure. No name, no amount, no kind; the
+  badge is derived from a live offer, so it cannot be set by hand or outlive the offer.
 - A discount must not buy what a donation buys. The logo tier is for a part given or lent;
   a discount earns a named thank-you and nothing more. Tier belongs to the vendor, best
   contribution winning, so a donor who also discounts something stays a donor.
@@ -16,15 +18,19 @@ them are not style questions:
 from __future__ import annotations
 
 import re
+import subprocess
+from datetime import date
 
 import pytest
 import yaml
 
+from selfdrive.web.offers import load_overlay, load_parts
 from selfdrive.web.sponsor import (
     DATA,
     KNOWN_CONTRIBUTIONS,
     KNOWN_STATES,
     LOGO_TIER,
+    REPO_ROOT,
     build,
     public_state,
     render,
@@ -274,3 +280,168 @@ def test_both_tiers_are_published_on_the_page():
     assert "If you offer a discount" in page
     for line in REAL["sponsor_gets"]["discounted"]:
         assert line.split(".")[0][:40] in page.replace("&#x27;", "'")
+
+
+OFFER = {
+    "by": "Quietly Generous Ltd",
+    "kind": "discounted",
+    "unit_price": 199.0,
+    "shipping": 12.5,
+    "expires": date(2026, 12, 1),
+    "checked": date(2026, 9, 30),
+    "note": "40 % off list for a student team",
+}
+TODAY = date(2026, 9, 30)
+
+
+def _with_offer(offer: dict | None = OFFER) -> dict:
+    data = _minimal()
+    data["groups"][0]["items"][0]["options"][0]["offers"] = [offer or OFFER]
+    return data
+
+
+def test_an_offer_is_published_as_a_fact_and_never_as_a_figure():
+    """The one thing the page may say is that an offer exists. Who made it, how much and
+    what kind are all theirs to share rather than ours."""
+    page, counts = render(_with_offer(), today=TODAY)
+    assert "Offer received - still open" in page
+    assert counts.offered == 1
+    for secret in ("Quietly Generous", "199", "12.5", "discounted", "40 %", "2026-12-01"):
+        assert secret not in page, f"the page leaked {secret!r}"
+
+
+def test_the_badge_says_the_line_is_still_open():
+    """Without those two words the badge reads as 'slot taken' and costs us the second
+    offer, which is the only reason to show anything."""
+    page, counts = render(_with_offer(), today=TODAY)
+    row = page.split('<li class="opt">')[1]
+    badge = row.split('class="badge offer">')[1].split("</span>")[0]
+    assert "still open" in badge.lower()
+    # Still an ask, still counted as one.
+    assert counts.needed == 1
+    assert "<strong>1</strong> parts still needed" in page
+
+
+def test_an_expired_offer_leaves_no_trace_on_the_page():
+    """A badge that outlives its offer is the page lying on our behalf."""
+    lapsed = dict(OFFER, expires=date(2026, 9, 29))
+    page, counts = render(_with_offer(lapsed), today=TODAY)
+    assert "Offer received" not in page
+    assert "Still needed" in page
+    assert counts.offered == 0
+    # It was true the day before.
+    assert render(_with_offer(lapsed), today=date(2026, 9, 29))[1].offered == 1
+
+
+def test_the_badge_is_explained_only_on_a_page_that_shows_one():
+    """An explanation of a badge the reader cannot see is a hint about what we are not
+    telling them."""
+    with_offer, _ = render(_with_offer(), today=TODAY)
+    without, _ = render(_minimal(), today=TODAY)
+    assert "not accepted anything yet" in with_offer
+    assert "nothing has been accepted" not in without
+
+
+def test_the_offer_badge_is_derived_so_it_cannot_be_set_by_hand():
+    """`offered` is not a state. If it were, somebody would set it and forget it."""
+    assert "offered" not in KNOWN_STATES
+    with pytest.raises(ValueError, match="unknown state"):
+        public_state("offered")
+
+
+def test_internal_offer_fields_never_reach_the_page_from_the_real_data():
+    """Run against the merged data, overlay included, so this guards the real quotes.
+
+    A vendor's own name is the one thing not asserted here: several of these products are
+    named after the company that makes them, so "Luxonis" is on the page either way. That
+    is the documented cost of the badge. Every field that is actually a secret - what we
+    would pay, what they charge to ship, when it lapses, and the note that carries the
+    discount code and the contact who sent it - must be absent.
+    """
+    merged = load_parts(DATA)
+    page, _ = render(merged, today=date.today())
+    for group in merged["groups"]:
+        for item in group["items"]:
+            for opt in item.get("options", []):
+                for offer in opt.get("offers", []):
+                    where = f"{item['part']} / {opt['name']}"
+                    assert str(offer["unit_price"]) not in page, where
+                    assert str(offer["expires"]) not in page, where
+                    assert str(offer["checked"]) not in page, where
+                    assert offer["kind"] not in page, where
+                    for word in str(offer.get("note", "")).split():
+                        if len(word) > 12:  # a code, an email, a long surname
+                            assert word not in page, f"{where}: {word}"
+
+
+def test_the_overlay_of_real_quotes_is_not_committed():
+    """The reason the overlay exists at all: this repository is public."""
+    ignored = (REPO_ROOT / ".gitignore").read_text()
+    assert "web/sponsor/offers.local.yaml" in ignored
+    tracked = subprocess.run(
+        ["git", "ls-files", "web/sponsor/offers.local.yaml"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert tracked.stdout.strip() == "", "the real quotes are committed to a public repo"
+
+
+def _vendors(overlay: dict) -> set[str]:
+    named = {o["by"] for opts in (overlay.get("offers") or {}).values()
+             for offers in opts.values() for o in offers}
+    return named | {lead["by"] for lead in overlay.get("leads") or []}
+
+
+def test_the_example_overlay_is_committed_and_carries_no_real_quote():
+    """It documents the shape. If somebody puts a real figure in it, it gets published.
+
+    Compared vendor by vendor rather than by searching the text, because the example
+    points at a real option name and several of those are a manufacturer's own.
+    """
+    example = REPO_ROOT / "web" / "sponsor" / "offers.local.example.yaml"
+    text = example.read_text()
+    assert "gitignored" in text
+    assert not _vendors(yaml.safe_load(text)) & _vendors(load_overlay())
+
+
+def _two_options(offer_on: int) -> dict:
+    data = _minimal()
+    item = data["groups"][0]["items"][0]
+    item["options"] = [
+        {"name": "Luxonis OAK-D S2", "price": "$329"},
+        {"name": "Orbbec Gemini 335", "price": "$264"},
+    ]
+    item["options"][offer_on]["offers"] = [OFFER]
+    return data
+
+
+def test_the_badge_sits_on_the_option_offered_and_not_on_its_siblings():
+    """The point of putting it on the option: an offer on one camera says nothing about
+    the camera listed beside it, which is still wide open."""
+    page, _ = render(_two_options(offer_on=1), today=TODAY)
+    rows = page.split('<li class="opt">')[1:]
+    assert len(rows) == 2
+    oak, orbbec = rows
+    assert "OAK-D S2" in oak and "Gemini 335" in orbbec
+    assert "Offer received" not in oak, "an untouched option was badged"
+    assert "Offer received" in orbbec
+    assert page.count("badge offer") == 2, "one on the option, one in the explainer"
+
+
+def test_a_part_is_still_published_as_needed_while_an_option_has_an_offer():
+    """Because it is. Nothing has been accepted, and the headline must not shrink."""
+    page, counts = render(_two_options(offer_on=0), today=TODAY)
+    header = page.split('<article class="item">')[1].split("</header>")[0]
+    assert "Still needed" in header
+    assert "Offer received" not in header
+    assert counts.needed == 1 and counts.offered == 1
+    assert "<strong>1</strong> parts still needed" in page
+
+
+def test_the_explainer_says_the_other_options_are_untouched():
+    page, _ = render(_two_options(offer_on=1), today=TODAY)
+    note = page.split('class="gblurb offnote"')[1].split("</p>")[0]
+    assert "every other option on the same part is wide open" in note
+    assert "a gift always outranks a discount" in note

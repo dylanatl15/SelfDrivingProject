@@ -15,6 +15,10 @@ RUN pip install --no-cache-dir "pyyaml>=6"
 COPY src/selfdrive/__init__.py src/selfdrive/__init__.py
 COPY src/selfdrive/web src/selfdrive/web
 COPY web/sponsor/parts.yaml web/sponsor/parts.yaml
+# The offer overlay is gitignored and may not exist; the glob always matches the committed
+# example, so the build works either way. Without it the page is correct but shows no offer
+# badge. Only `dist/` is copied into the serving image below, so no quote ships in it.
+COPY web/sponsor/offers.local*.yaml web/sponsor/
 COPY media/demo-loop.mp4 media/demo-loop.mp4
 COPY media/demo-poster.jpg media/demo-poster.jpg
 COPY media/demo.mp4 media/demo.mp4

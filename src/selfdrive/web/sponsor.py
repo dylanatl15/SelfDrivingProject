@@ -2,26 +2,36 @@
 
     python -m selfdrive.web.sponsor            # -> web/sponsor/dist/
 
-Five rules are enforced here rather than left to whoever edits the page next, because
-each one is a way this kind of page does damage:
+Six rules are kept here rather than left to whoever edits the page next, because each one
+is a commitment the page makes to the people reading it:
 
-1. **No money total.** Counting dollars turns a parts list into a fundraiser, and a
-   fundraiser invites a different and much worse conversation. The page counts *parts*.
+1. **No money total.** This is a list of parts we need, not a fundraiser. The page counts
+   *parts*.
 2. **No vendor is named as having declined or ignored us.** `asked`, `declined` and
-   `no_reply` all render identically to `needed`, so the team can track cold asks in the
-   YAML without publishing a wall of shame. Only `pledged` and `received` name anyone.
-3. **`team_note` never renders.** The YAML lives in a public repository, so this is not a
-   secret - it is a place for per-vendor status that does not belong in front of sponsors.
+   `no_reply` all render identically to `needed`. Whether a company answered is between us
+   and them. Only `pledged` and `received` name anyone, and only with thanks.
+3. **`team_note` never renders.** It is a place for per-vendor status that does not belong
+   in front of sponsors.
 4. **Every price carries the date it was checked**, and an unverified figure says so. A
    stale price in front of a sponsor is worse than no price.
 5. **A discount does not buy a logo.** A donated or loaned part is a gift; a discount is a
    sale we got cheaper. Recognising them identically is unfair to the donor in a way anyone
-   can check, and it makes the poster look bought. `donated` and `loaned` earn the logo
-   tier, `discounted` earns a named thank-you and nothing else, and `purchased` is not
-   sponsorship at all. Tier is per *vendor*, not per part, and the best one wins: a vendor
-   who donates one part and discounts another is a donor outright.
+   can check. `donated` and `loaned` earn the logo tier, `discounted` earns a named
+   thank-you, and `purchased` is not sponsorship at all. Tier is per *vendor*, not per
+   part, and the best one wins: a vendor who donates one part and discounts another is a
+   donor outright.
+6. **An offer is published as a fact, never as a figure**, and on the *option*, not the
+   part. The badge says "Offer received - still open" and nothing else: no name, no amount,
+   no kind. What a company offered us is theirs to share, not ours, and some of it is sent
+   under terms that forbid passing it on. The figures stay in `offers.py` and in a
+   gitignored file it reads. The badge is *derived* from a live offer rather than hand-set,
+   so it cannot drift from the data and it disappears on the first build after the offer
+   expires. A standing public code is not an offer and does not badge: a price anyone can
+   get is not sponsorship, and listing it as such would be unfair to the companies who
+   gave us something.
 
-`tests/test_sponsor_page.py` pins all five.
+`tests/test_sponsor_page.py` pins all six. How we word things, and our working notes on
+particular vendors, are in `web/sponsor/playbook.local.md`, which is not committed.
 """
 
 from __future__ import annotations
@@ -30,10 +40,11 @@ import html
 import shutil
 import urllib.parse
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any
 
-import yaml
+from selfdrive.web.offers import has_live_offer, load_parts, option_has_live_offer
 
 # True states that the page must not distinguish between. A vendor who said no, and a
 # vendor nobody has emailed yet, look the same to a reader: the part is still needed.
@@ -84,6 +95,8 @@ class Counts:
     needed: int = 0
     pledged: int = 0
     received: int = 0
+    # A subset of `needed`: somebody has offered, nothing has landed. Still needed.
+    offered: int = 0
     # vendor name -> their best contribution across every part they helped with.
     vendors: dict[str, str] = field(default_factory=dict)
 
@@ -97,7 +110,11 @@ class Counts:
         return sorted(v for v, c in self.vendors.items() if c in names)
 
     def __str__(self) -> str:
-        return f"{self.needed} still needed, {self.pledged} pledged, {self.received} received"
+        offers = f" ({self.offered} with an offer)" if self.offered else ""
+        return (
+            f"{self.needed} still needed{offers}, "
+            f"{self.pledged} pledged, {self.received} received"
+        )
 
 
 def public_state(state: str) -> str:
@@ -133,25 +150,33 @@ def contribution_of(item: dict, state: str) -> str:
     return value
 
 
-def _option(opt: dict) -> str:
+def _option(opt: dict, where: str, today: date) -> str:
     name = esc(opt["name"])
     if opt.get("url"):
         name = f'<a href="{esc(opt["url"])}" rel="noopener">{name}</a>'
     price = esc(opt.get("price", ""))
     tag = "" if opt.get("verified", True) else '<span class="unver">price not verified</span>'
+    # On the option, not on the part: an offer on one camera says nothing about the
+    # camera listed beside it, and every other option on the part stays open.
+    offer = ""
+    if option_has_live_offer(opt, where, today):
+        offer = '<span class="badge offer">Offer received - still open</span>'
     note = f'<p class="onote">{esc(opt["note"])}</p>' if opt.get("note") else ""
     return (
         '<li class="opt">'
         f'<div class="oline"><span class="oname">{name}</span>'
-        f'<span class="oprice">{price}</span></div>{tag}{note}</li>'
+        f'<span class="oprice">{price}</span></div>{offer}{tag}{note}</li>'
     )
 
 
-def _item(item: dict, counts: Counts) -> str:
+def _item(item: dict, counts: Counts, today: date) -> str:
     state = public_state(item.get("state", "needed"))
     contribution = contribution_of(item, state)
     if state == "needed":
         counts.needed += 1
+        # The part is still needed even when one of its options has an offer, and saying
+        # so here is not a hedge - it is the fact. The offer badge sits on the option.
+        counts.offered += 1 if has_live_offer(item, today) else 0
         badge = '<span class="badge need">Still needed</span>'
     else:
         counts.pledged += 1 if state == "pledged" else 0
@@ -169,7 +194,8 @@ def _item(item: dict, counts: Counts) -> str:
     if item.get("spec"):
         spec = f'<p class="spec"><strong>Has to:</strong> {esc(item["spec"])}</p>'
     note = f'<p class="inote">{esc(item["note"])}</p>' if item.get("note") else ""
-    opts = "".join(_option(o) for o in item.get("options", []))
+    part = str(item.get("part", "?"))
+    opts = "".join(_option(o, part, today) for o in item.get("options", []))
     return (
         '<article class="item">'
         f'<header><h3>{esc(item["part"])}{qty_html}</h3>{badge}</header>'
@@ -179,13 +205,14 @@ def _item(item: dict, counts: Counts) -> str:
     )
 
 
-def render(data: dict) -> tuple[str, Counts]:
+def render(data: dict, today: date | None = None) -> tuple[str, Counts]:
     meta = data["meta"]
     counts = Counts()
+    today = today or date.today()
 
     groups = []
     for group in data["groups"]:
-        items = "".join(_item(i, counts) for i in group["items"])
+        items = "".join(_item(i, counts, today) for i in group["items"])
         blurb = f'<p class="gblurb">{esc(group["blurb"])}</p>' if group.get("blurb") else ""
         groups.append(
             f'<section class="group"><h2>{esc(group["name"])}</h2>{blurb}'
@@ -223,6 +250,21 @@ def render(data: dict) -> tuple[str, Counts]:
         credits_html = (
             '<section id="credits"><h2>Who has helped so far</h2>'
             f'<div class="panel">{blocks}</div></section>'
+        )
+
+    # Explains the offer badge only on a page that has one. An explanation of a badge the
+    # reader cannot see is just a hint about what we are not telling them.
+    offer_note = ""
+    if counts.offered:
+        offer_note = (
+            '<p class="gblurb offnote">'
+            '<span class="badge offer">Offer received - still open</span> means somebody has '
+            "kindly offered us that one option. We are grateful for it, and we have not "
+            "accepted anything yet. Who they are and what they offered is theirs to share, "
+            "not ours, so we keep it to ourselves. It closes no doors: a better offer on "
+            "that option is still very welcome, every other option on the same part is "
+            "wide open, and a gift always outranks a discount - "
+            '<a href="#gets">what a sponsor gets</a> explains both.</p>'
         )
 
     # Parts, never dollars. See rule 1 in the module docstring.
@@ -359,6 +401,14 @@ def render(data: dict) -> tuple[str, Counts]:
   .badge.got {{
     color: #34d399; background: rgba(52,211,153,.10); border: 1px solid rgba(52,211,153,.34);
   }}
+  /* Something is moving, nothing has landed - so neither the amber of "needed" nor the
+     green of "received". Violet sits between them and matches the site. */
+  .badge.offer {{
+    color: #c084fc; background: rgba(168,85,247,.12); border: 1px solid rgba(168,85,247,.38);
+  }}
+  .offnote .badge {{ margin-left: 0; display: inline-block; vertical-align: baseline; }}
+  .opt .badge {{ margin-left: 0; display: inline-block; margin-top: 7px; font-size: 10.5px; }}
+  .offnote {{ border-left: 2px solid rgba(168,85,247,.38); padding-left: 14px; }}
   /* Bought at the ordinary price: no vendor named, so it is deliberately the quiet one. */
   .badge.own {{
     color: var(--dimmer); background: rgba(255,255,255,.04); border: 1px solid var(--line);
@@ -439,6 +489,7 @@ def render(data: dict) -> tuple[str, Counts]:
     we left it off rather than let anyone spend money on it. Prices are what the vendor's own
     store said on {esc(meta["prices_checked"])}, and each links to where we read it.
   </p>
+  {offer_note}
 </section>
 
 {"".join(groups)}
@@ -510,7 +561,9 @@ def render(data: dict) -> tuple[str, Counts]:
 
 
 def build(data_path: Path = DATA, out_dir: Path = DIST) -> Counts:
-    data = yaml.safe_load(data_path.read_text())
+    # Offers are merged in from a gitignored file, never stored in `parts.yaml`, which is
+    # public. The page reads one bit per option out of them and prints none of the rest.
+    data = load_parts(data_path)
     page, counts = render(data)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "index.html").write_text(page)
@@ -526,7 +579,21 @@ def main(argv=None) -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--data", type=Path, default=DATA)
     p.add_argument("--out", type=Path, default=DIST)
+    p.add_argument(
+        "--plan",
+        action="store_true",
+        help="print the team's cheapest-path table instead of building. Names vendors and "
+        "prints figures, so it goes to a terminal and never into the page.",
+    )
     args = p.parse_args(argv)
+
+    if args.plan:
+        from selfdrive.web.offers import load_overlay, plan_text
+
+        overlay = load_overlay()
+        data = load_parts(args.data)
+        print(plan_text(data, date.today(), leads=overlay.get("leads") or []))
+        return
 
     counts = build(args.data, args.out)
     page = args.out / "index.html"

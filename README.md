@@ -11,7 +11,7 @@ it. The other half — Android app, ESP32 firmware, chassis — is built by team
 [`docs/protocol.md`](docs/protocol.md), which is frozen so that both halves can be written
 at the same time.
 
-Python 3.12 · PPO (Stable-Baselines3) · Gymnasium · vectorized NumPy geometry · 424 tests
+Python 3.12 · PPO (Stable-Baselines3) · Gymnasium · vectorized NumPy geometry · 474 tests
 
 ---
 
@@ -300,7 +300,7 @@ src/selfdrive/
   export/         self-contained ONNX export for the phone
   link/           serial codec, simulated ESP32, and the phone-side reference loop
   web/            generator for the public sponsor page
-tests/            424 tests across 23 files
+tests/            474 tests across 24 files
 media/            the demo reel
 web/sponsor/      parts.yaml, nginx config and Dockerfile behind sponsor.dylantamayo.dev
 ```

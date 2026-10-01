@@ -29,6 +29,34 @@
 # and it makes the poster look bought. The tier belongs to the VENDOR, not the part, and
 # their best contribution wins: donate one part and discount another and you are a donor.
 #
+# WHAT A VENDOR HAS OFFERED DOES NOT GO IN THIS FILE. This file is committed to a public
+# repository, so a quote written here is published on github.com - which is exactly what
+# the page refuses to do, just round the back. Offers live in `offers.local.yaml`, which
+# is gitignored; `offers.local.example.yaml` documents the shape and is committed.
+#
+# They are merged onto these options at build time, and the page learns one bit per
+# option: that a live offer exists. It badges THAT OPTION "Offer received - still open",
+# with no name, no figure and no kind. The part still reads "Still needed", because it is.
+#
+# A STANDING PUBLIC CODE IS NOT AN OFFER. A student discount, an education price or a sale
+# anyone can use still changes what we pay, so it ranks in the plan, but it is a price
+# anyone can get, not sponsorship, so it badges nothing. Record it as
+# `kind: public_discount`.
+#
+# What a company offered us is theirs to share rather than ours, and some of it is sent
+# under terms that forbid passing it on, so no figure is ever published. The badge goes on
+# the option because an offer on one camera says nothing about the camera beside it.
+#
+# Rank offers by LANDED PRICE, never by percent off: 20 % off a $334 camera is $267, and
+# 10 % off a $264 camera is $238. `python -m selfdrive.web.sponsor --plan` prints the
+# ranking; it is internal.
+#
+# Two fields here exist for that table and never render. `knock_on:` on an option is the
+# dollars a cheaper choice adds elsewhere in the build - a camera that cannot run the
+# network on board forces the bigger computer. `options_are: all_needed` on an item marks
+# a line that is a kit rather than a choice, so its options are summed; an option may then
+# carry its own `qty:`.
+#
 # EVERY OPTION MUST BE ONE WE WOULD ACTUALLY ACCEPT AND USE. An option we would turn down
 # is not generosity, it is a trap: a vendor ships it, we cannot use it, and we have wasted
 # their money and their goodwill. Parts ruled out during the design are recorded in
@@ -52,7 +80,7 @@ meta:
 
 # Short, checkable claims. Numbers only, no adjectives.
 status:
-  - Simulator and reinforcement-learning stack are built, tested and public - 424 unit tests.
+  - Simulator and reinforcement-learning stack are built, tested and public - 474 unit tests.
   - Policies train on 20 parallel workers and are scored on 100 held-out arenas they never saw.
   - Best policy reaches 2.3 waypoints per 50 s run on unseen arenas and covers 19.1 m² of new ground.
   - It still crashes on 17 % of those held-out runs. That number is going down and we publish it.
@@ -300,6 +328,7 @@ groups:
     items:
       - part: Battery packs and a charger
         qty: 3 packs, 1 charger
+        options_are: all_needed
         why: Three packs, so an afternoon of testing does not stop to recharge.
         spec: 2S 5000 mAh hard-case packs, and a balance charger that handles them.
         state: needed
@@ -309,6 +338,7 @@ groups:
             url: https://www.buddyrc.com/collections/gens-ace-batteries
             note: Hard-case, which matters on a car whose whole purpose is to learn from crashes.
           - name: SkyRC B6Neo balance charger
+            qty: 1
             price: $35
             url: https://www.amazon.com/clp/B0CCT2WGNS
             note: One charger covers all three packs.
@@ -328,6 +358,7 @@ groups:
 
       - part: Radio transmitter, receiver and a hard kill switch
         qty: 1
+        options_are: all_needed
         why: A human override that does not depend on any of the software above working correctly.
         spec: Any 6-channel hobby radio, plus a switch that physically opens the motor circuit.
         note: >-

@@ -1,0 +1,56 @@
+# Copy this to `offers.local.yaml`, which is gitignored, and put the real figures there.
+#
+# WHY A SEPARATE FILE. `parts.yaml` is committed to a public repository. A vendor's quote
+# written into it is published on github.com, which is exactly what the page is careful
+# not to do - just round the back. Discount codes, per-unit prices, expiry terms and the
+# name of the person who sent them live here and are never committed.
+#
+# WHAT REACHES THE PAGE. One bit per option: whether a live offer exists. That option gets
+# a badge reading "Offer received - still open" - no vendor, no figure, no kind - and the
+# part above it still reads "Still needed", because it is. Everything else in this file is
+# for `python -m selfdrive.web.sponsor --plan`, which prints to a terminal.
+#
+# Keys must match `parts.yaml` exactly: part name, then option name. A key that matches
+# nothing is a hard error at build time. A renamed part would otherwise take its offers
+# with it in silence, and the plan would go on recommending a price we are not paying.
+
+offers:
+  Depth camera:
+    Luxonis OAK-D S2:
+      - by: Example Vision Co
+        kind: discounted        # see the kinds below; a gift must be unit_price 0
+        unit_price: 249.00      # per unit, what we would actually pay, after the discount
+        shipping: 0             # per order, 0 if included
+        expires: 2026-12-01     # REQUIRED - the badge disappears on the first build after
+        checked: 2026-09-30     # REQUIRED - when we last confirmed it
+        note: anything the team needs to remember - a code, who said it, what it covers
+
+# KINDS, and which of them badge:
+#
+#   donated | loaned      someone chose to give or lend us the part. unit_price must be 0.
+#                         Earns the logo tier if accepted. BADGES.
+#   discounted            someone read our ask and decided to cut a price for this team.
+#                         Earns a named thank-you if accepted. BADGES.
+#   public_discount       a standing student or education price, or a sale anyone can use.
+#                         A price that was already there, open to anyone who qualifies.
+#                         RANKS LIKE ANY OTHER PRICE. BADGES NOTHING.
+#
+# The last one is the easy mistake. Badging a public price would say this project has a
+# sponsor when it does not, which is unfair to the companies that do give. Buying at a
+# public price is `purchased`, which names nobody, so a public code can never become a
+# sponsor credit either.
+
+# A lead is a kind offer that is not attached to a product yet: "50 % off what you need",
+# with no part named. Leads are listed by `--plan` and costed nowhere, and they badge
+# nothing, because a badge needs an option to sit on. Writing a figure against a product
+# nobody named would be putting words in their mouth, and would let the plan rank a number
+# nobody quoted. Ask which products it covers, then record it as an offer above.
+leads:
+  - by: Example Components Inc
+    heard: 2026-09-30
+    contact: Firstname Lastname, Title <someone@example.com>
+    said: the offer in their own words, quoted, so nobody paraphrases it later
+    next: what we have to ask before this can become an offer above
+
+# Working notes on a particular vendor - what we think they will do, what we plan to say -
+# belong in `playbook.local.md`, not here and never in a committed file.
